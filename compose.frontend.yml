@@ -1,0 +1,13 @@
+services:
+  one-diary-web:
+    build:
+      context: .
+      args:
+        VITE_API_URL: /v1
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+    restart: unless-stopped
+    ports:
+      - "3080:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
