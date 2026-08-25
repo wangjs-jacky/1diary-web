@@ -1,6 +1,41 @@
 const escapeHtml = (value: string) =>
   value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
+const ATTACHMENT_PATTERN = /!\[([^\]]*)\]\(attachment:\/\/([^)]+)\)(?:\{width=(\d+)%\})?/g;
+
+export type AttachmentMarkdownToken = {
+  id: string;
+  alt: string;
+  widthPercent: number;
+};
+
+type SerializeAttachmentInput = {
+  id: string;
+  alt?: string;
+  widthPercent?: number;
+};
+
+export function clampImageWidth(value?: number) {
+  return Math.min(100, Math.max(20, Number.isFinite(value) ? Math.round(value!) : 100));
+}
+
+export function parseAttachmentMarkdown(markdown: string): AttachmentMarkdownToken[] {
+  return [...markdown.matchAll(ATTACHMENT_PATTERN)].map((match) => ({
+    id: match[2]!,
+    alt: match[1] ?? '',
+    widthPercent: clampImageWidth(match[3] ? Number(match[3]) : 100),
+  }));
+}
+
+export function serializeAttachmentMarkdown({
+  id,
+  alt = '',
+  widthPercent = 100,
+}: SerializeAttachmentInput) {
+  const safeAlt = alt.replace(/[\[\]\r\n]/g, ' ').trim();
+  return `![${safeAlt}](attachment://${id}){width=${clampImageWidth(widthPercent)}%}`;
+}
+
 function inlineToHtml(value: string) {
   return escapeHtml(value)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -17,12 +52,13 @@ export function markdownToHtml(
     .split(/\n{2,}/)
     .filter(Boolean)
     .map((block) => {
-      const image = /^!\[(.*?)\]\(attachment:\/\/([^)]+)\)$/.exec(block);
+      const image = /^!\[([^\]]*)\]\(attachment:\/\/([^)]+)\)(?:\{width=(\d+)%\})?$/.exec(block);
       if (image) {
-        const [, caption, id] = image;
+        const [, caption, id, widthValue] = image;
+        const widthPercent = clampImageWidth(widthValue ? Number(widthValue) : 100);
         const url = attachmentUrls.get(id!);
         const safeUrl = url && /^(?:https?:|blob:)/i.test(url) ? url : '';
-        return `<figure data-attachment-id="${escapeHtml(id!)}">${
+        return `<figure data-attachment-id="${escapeHtml(id!)}" data-image-width="${widthPercent}" style="width:${widthPercent}%;max-width:100%">${
           safeUrl
             ? `<img src="${escapeHtml(safeUrl)}" alt="${escapeHtml(caption!)}">`
             : '<div class="image-placeholder">图片离线缓存不可用</div>'
@@ -71,7 +107,11 @@ export function htmlToMarkdown(root: HTMLElement) {
         const id = node.dataset.attachmentId;
         if (!id) return '';
         const caption = node.querySelector('figcaption')?.textContent?.trim() || '图片';
-        return `![${caption}](attachment://${id})`;
+        return serializeAttachmentMarkdown({
+          id,
+          alt: caption,
+          widthPercent: Number(node.dataset.imageWidth || 100),
+        });
       }
       return text;
     })
@@ -81,7 +121,7 @@ export function htmlToMarkdown(root: HTMLElement) {
 
 export function visibleText(markdown: string) {
   return markdown
-    .replace(/!\[[^\]]*\]\(attachment:\/\/[^)]+\)/g, '')
+    .replace(ATTACHMENT_PATTERN, '')
     .replace(/[#>*_`-]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();

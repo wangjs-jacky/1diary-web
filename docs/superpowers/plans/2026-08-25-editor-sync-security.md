@@ -259,11 +259,12 @@ git commit -m "fix(sync): isolate attachment upload failures"
 ### Task 5: Supabase Data API 收口迁移
 
 **Files:**
+- Modify: `../1diary-backend/src/db/migrations/0011_revoke_data_api_access.sql`
 - Create: `../1diary-backend/src/db/migrations/0012_enable_business_table_rls.sql`
 - Modify: `../1diary-backend/test/contract/migration-metadata.test.ts`
 
 **Interfaces:**
-- Consumes: 现有 `0011_revoke_data_api_access.sql` 已撤销公开角色权限
+- Consumes: 现有 `0011_revoke_data_api_access.sql` 撤销公开角色权限，但必须先补齐 Drizzle statement breakpoint
 - Produces: 16 张 `public` 业务表启用 RLS，后端 owner/server role 保持可访问
 
 - [ ] **Step 1: 写迁移契约失败测试**
@@ -274,14 +275,18 @@ for (const table of businessTables) {
   expect(migration).toContain(`ALTER TABLE public.${table} ENABLE ROW LEVEL SECURITY`);
 }
 expect(migration).not.toMatch(/CREATE POLICY/i);
+const revokeMigration = await readFile(new URL('../../src/db/migrations/0011_revoke_data_api_access.sql', import.meta.url), 'utf8');
+expect(revokeMigration.match(/--> statement-breakpoint/g)).toHaveLength(3);
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
 
 Run: `pnpm test -- test/contract/migration-metadata.test.ts`
-Expected: FAIL，0012 尚不存在。
+Expected: FAIL，0012 尚不存在，且现有 0011 的三条顶层 REVOKE 没有逐条分隔。
 
-- [ ] **Step 3: 创建只启用 RLS 的迁移**
+- [ ] **Step 3: 修复 0011 并创建只启用 RLS 的迁移**
+
+在 0011 的三条顶层 `REVOKE` 后分别加入 `--> statement-breakpoint`，使 PGlite 与生产 Drizzle migrator 都按单语句执行；同时更新 delta probe 对 0010/0011/0012 文件名的预期。
 
 ```sql
 ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
