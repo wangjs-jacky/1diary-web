@@ -2,6 +2,7 @@ common:
   deployment:
     instanceId: i-bp1gx28cmt3tfsrcw0vd
     port: 3080
+    regionId: cn-hangzhou
   scripts:
     start: |-
       #!/bin/bash
