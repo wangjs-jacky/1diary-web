@@ -1,4 +1,5 @@
 .worktrees/
+.appmanager/config-demo.yaml
 node_modules/
 dist/
 .env
