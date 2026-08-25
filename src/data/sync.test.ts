@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OutboxRecord } from '../domain/types';
 import { apiRequest, uploadPresigned } from './api';
 import { db } from './db';
-import { partitionPushableRecords, pushOutbox, queueOperation } from './sync';
+import {
+  partitionPushableRecords,
+  pushOutbox,
+  queueOperation,
+  subscribeSyncStatus,
+  syncNow,
+} from './sync';
 
 vi.mock('./api', () => ({
   apiRequest: vi.fn(),
@@ -137,5 +143,87 @@ describe('offline outbox', () => {
     expect(records[1]?.baseVersion).toBe('1');
     expect(records[1]?.payload.expectedVersion).toBe('1');
     expect(records[1]?.payload.bodyMarkdown).toBe('更新后的内容');
+  });
+
+  it('does not add draft-only expectedVersion when coalescing entry publishes', async () => {
+    const entryId = '018f6b6a-7b03-7abc-8def-0123456789ab';
+    const draftId = '018f6b6a-7b03-7abc-8def-0123456789ac';
+    const payload = {
+      mode: 'publish',
+      draftId,
+      expectedDraftVersion: '1',
+      tagLinks: [],
+    };
+    await queueOperation({
+      entityType: 'entry', entityId: entryId, operation: 'upsert', baseVersion: '0', payload,
+    });
+    await queueOperation({
+      entityType: 'entry', entityId: entryId, operation: 'upsert', baseVersion: '0', payload,
+    });
+
+    const records = await db.outbox.toArray();
+    expect(records).toHaveLength(1);
+    expect(records[0]?.payload).toEqual(payload);
+  });
+
+  it('repairs legacy publish records before pushing them', async () => {
+    const record = outboxRecord({
+      entityType: 'entry',
+      operation: 'upsert',
+      payload: {
+        mode: 'publish',
+        draftId: '018f6b6a-7b03-7abc-8def-0123456789ac',
+        expectedDraftVersion: '1',
+        expectedVersion: '0',
+        tagLinks: [],
+      },
+      attempts: 3,
+      nextAttemptAt: '2099-01-01T00:00:00.000Z',
+    });
+    await db.outbox.put(record);
+    mockedApiRequest.mockImplementation(async (path) => {
+      if (path === '/sync/push') {
+        return {
+          results: [{
+            operationId: record.operationId,
+            entityType: record.entityType,
+            entityId: record.entityId,
+            status: 'applied',
+            version: '1',
+          }],
+        };
+      }
+      throw new Error(`unexpected path: ${path}`);
+    });
+
+    await pushOutbox('device-1');
+
+    const pushCall = mockedApiRequest.mock.calls.find(([path]) => path === '/sync/push');
+    const pushBody = JSON.parse(String(pushCall?.[1]?.body));
+    expect(pushBody.operations).toHaveLength(1);
+    expect(pushBody.operations[0].payload).not.toHaveProperty('expectedVersion');
+    expect(await db.outbox.get(record.operationId)).toBeUndefined();
+  });
+
+  it('does not report success while operations are still waiting for retry', async () => {
+    await db.meta.put({ key: 'syncCursor', value: '0' });
+    await db.outbox.put(outboxRecord({ nextAttemptAt: '2099-01-01T00:00:00.000Z' }));
+    mockedApiRequest.mockImplementation(async (path) => {
+      if (path === '/devices/register') return {};
+      if (path.startsWith('/sync/pull')) {
+        return { changes: [], nextCursor: '0', hasMore: false };
+      }
+      throw new Error(`unexpected path: ${path}`);
+    });
+    const events: Array<{ status: string; detail?: string }> = [];
+    const unsubscribe = subscribeSyncStatus((event) => events.push(event));
+
+    try {
+      await syncNow();
+    } finally {
+      unsubscribe();
+    }
+
+    expect(events.at(-1)).toEqual({ status: 'partial', detail: '还有 1 条内容等待同步' });
   });
 });

@@ -124,7 +124,11 @@ export async function queueOperation(
   const predictedBase = existing?.baseVersion ?? (followsAttemptedDraft
     ? (BigInt(predecessor.baseVersion) + 1n).toString()
     : operation.baseVersion);
-  const payload = existing || followsAttemptedDraft
+  const shouldUpdateExpectedVersion =
+    operation.entityType === 'draft' &&
+    operation.operation === 'upsert' &&
+    Boolean(existing || followsAttemptedDraft);
+  const payload = shouldUpdateExpectedVersion
     ? { ...operation.payload, expectedVersion: predictedBase }
     : operation.payload;
   const record: OutboxRecord = {
@@ -221,10 +225,34 @@ export function partitionPushableRecords(
   return { pushable, deferred };
 }
 
+function repairLegacyPublishRecord(record: OutboxRecord, now: string) {
+  if (
+    record.entityType !== 'entry' ||
+    record.operation !== 'upsert' ||
+    record.payload.mode !== 'publish' ||
+    !Object.hasOwn(record.payload, 'expectedVersion')
+  ) {
+    return record;
+  }
+  const payload = { ...record.payload };
+  delete payload.expectedVersion;
+  return {
+    ...record,
+    payload,
+    attempts: 0,
+    nextAttemptAt: now,
+    lastError: undefined,
+  };
+}
+
 export async function pushOutbox(deviceId: string) {
   const uploadSummary = await uploadPendingAttachments();
   const now = new Date().toISOString();
-  const records = (await db.outbox.orderBy('createdAt').toArray())
+  const storedRecords = await db.outbox.orderBy('createdAt').toArray();
+  const repairedRecords = storedRecords.map((record) => repairLegacyPublishRecord(record, now));
+  const changedRecords = repairedRecords.filter((record, index) => record !== storedRecords[index]);
+  if (changedRecords.length) await db.outbox.bulkPut(changedRecords);
+  const records = repairedRecords
     .filter((item) => item.nextAttemptAt <= now)
     .slice(0, 100);
   const { pushable } = partitionPushableRecords(records, uploadSummary.failedDraftIds);
@@ -318,7 +346,8 @@ async function performSync() {
       const count = uploadSummary.failedAttachmentIds.size;
       setStatus('partial', `${count} 张图片待重试，其他内容已同步`);
     } else {
-      setStatus('idle');
+      const count = await db.outbox.count();
+      setStatus(count ? 'partial' : 'idle', count ? `还有 ${count} 条内容等待同步` : undefined);
     }
   } catch (error) {
     setStatus(navigator.onLine ? 'error' : 'offline', error instanceof Error ? error.message : '同步失败');
