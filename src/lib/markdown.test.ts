@@ -17,6 +17,14 @@ describe('markdown editor conversion', () => {
     expect(html).not.toContain('<script>');
   });
 
+  it('keeps ordered lists ordered across editor conversion', () => {
+    const html = markdownToHtml('1. 第一项\n2. 第二项');
+    expect(html).toContain('<ol>');
+    const root = document.createElement('div');
+    root.innerHTML = html;
+    expect(htmlToMarkdown(root)).toBe('1. 第一项\n2. 第二项');
+  });
+
   it('round-trips inline attachment references', () => {
     const root = document.createElement('div');
     root.innerHTML = '<h2>散步</h2><p>今天很好。</p><figure data-attachment-id="abc"><img src="blob:x"><figcaption>江边</figcaption></figure>';

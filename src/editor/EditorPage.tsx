@@ -1,13 +1,15 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ImagePlus } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiRequest } from '../data/api';
 import { db } from '../data/db';
 import { queueOperation, syncNow } from '../data/sync';
-import type { Attachment, Draft, Entry, RelationshipLink } from '../domain/types';
+import type { Attachment, Draft, Entry } from '../domain/types';
 import { newId } from '../lib/ids';
-import { htmlToMarkdown, markdownToHtml, visibleText, wordCount } from '../lib/markdown';
+import { parseAttachmentMarkdown, visibleText, wordCount } from '../lib/markdown';
 import { formatDiaryDate, localJournalTime } from '../lib/time';
+import { DiaryEditor, type DiaryEditorHandle } from './DiaryEditor';
 
 const ALLOWED_IMAGES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -23,10 +25,10 @@ const emptyAudit = (now: string) => ({ version: '0', createdAt: now, updatedAt: 
 export function EditorPage({ mode }: { mode: EditorMode }) {
   const { id = '' } = useParams();
   const navigate = useNavigate();
-  const editorRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<DiaryEditorHandle>(null);
+  const markdownRef = useRef('');
   const saveTimer = useRef<number | null>(null);
   const activeDraft = useRef<Draft | null>(null);
-  const savedRange = useRef<Range | null>(null);
   const objectUrls = useRef<string[]>([]);
   const initializedFields = useRef(false);
   const [ready, setReady] = useState(false);
@@ -35,7 +37,8 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
   const [categoryId, setCategoryId] = useState<string>('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [tagPicker, setTagPicker] = useState(false);
-  const [formatOpen, setFormatOpen] = useState(false);
+  const [editorValue, setEditorValue] = useState('');
+  const [attachmentUrls, setAttachmentUrls] = useState<ReadonlyMap<string, string>>(new Map());
   const initialTime = localJournalTime();
   const [journalDate, setJournalDate] = useState(initialTime.journalDate);
   const [journalTime, setJournalTime] = useState(initialTime.journalTime.slice(0, 5));
@@ -118,13 +121,15 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
           // The local entry remains editable when the detail or signed URLs are unavailable.
         }
       }
-      if (cancelled || !editorRef.current) return;
+      if (cancelled) return;
       activeDraft.current = draft;
       setCategoryId(draft.categoryId ?? '');
       setSelectedTags((draft.tagLinks ?? []).map((item) => item.tagId));
       setJournalDate(draft.journalDate);
       setJournalTime(draft.journalTime.slice(0, 5));
-      editorRef.current.innerHTML = markdownToHtml(draft.bodyMarkdown, attachmentUrls);
+      markdownRef.current = draft.bodyMarkdown;
+      setEditorValue(draft.bodyMarkdown);
+      setAttachmentUrls(attachmentUrls);
       setCount(wordCount(draft.bodyMarkdown));
       setReady(true);
     }
@@ -139,24 +144,22 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
 
   const persistDraft = useCallback(async () => {
     let previous = activeDraft.current;
-    const root = editorRef.current;
-    if (!previous || !root) return null;
+    if (!previous) return null;
     const stored = await db.drafts.get(previous.id);
     if (stored && BigInt(stored.version) > BigInt(previous.version)) {
       previous = { ...previous, version: stored.version, createdAt: stored.createdAt, syncError: undefined };
     }
-    const bodyMarkdown = htmlToMarkdown(root);
-    const attachmentNodes = root.querySelectorAll<HTMLElement>('figure[data-attachment-id]');
-    if (!visibleText(bodyMarkdown) && attachmentNodes.length === 0) {
+    const bodyMarkdown = editorRef.current?.getMarkdown() ?? markdownRef.current;
+    markdownRef.current = bodyMarkdown;
+    const attachmentTokens = parseAttachmentMarkdown(bodyMarkdown);
+    if (!visibleText(bodyMarkdown) && attachmentTokens.length === 0) {
       setSaveState('空白内容不会保存');
       return null;
     }
     const now = new Date().toISOString();
     const existingTagLinks = new Map((previous.tagLinks ?? []).map((item) => [item.tagId, item.id]));
     const tagLinks = selectedTags.map((tagId) => ({ id: existingTagLinks.get(tagId) ?? newId(), tagId }));
-    const attachmentIds = [...attachmentNodes]
-      .map((node) => node.dataset.attachmentId)
-      .filter((value): value is string => Boolean(value));
+    const attachmentIds = attachmentTokens.map((token) => token.id);
     const existingAttachmentLinks = new Map(
       (previous.attachmentLinks ?? []).map((item) => [item.attachmentId, item.id]),
     );
@@ -223,8 +226,9 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
     return next;
   }, [categoryId, journalDate, journalTime, selectedTags]);
 
-  const scheduleSave = useCallback(() => {
-    const markdown = editorRef.current ? htmlToMarkdown(editorRef.current) : '';
+  const scheduleSave = useCallback((nextMarkdown?: string) => {
+    const markdown = nextMarkdown ?? editorRef.current?.getMarkdown() ?? markdownRef.current;
+    markdownRef.current = markdown;
     setCount(wordCount(markdown));
     setSaveState('正在自动保存…');
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
@@ -242,13 +246,6 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
     scheduleSave();
     // Category, tag, and diary time changes use the same autosave path.
   }, [ready, categoryId, selectedTags, journalDate, journalTime]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  function rememberRange() {
-    const selection = window.getSelection();
-    if (selection?.rangeCount && editorRef.current?.contains(selection.anchorNode)) {
-      savedRange.current = selection.getRangeAt(0).cloneRange();
-    }
-  }
 
   async function insertImage(file: File) {
     const draft = activeDraft.current;
@@ -285,32 +282,19 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
       byteSize: String(file.size),
       width: null,
       height: null,
-      sortOrder: editor.querySelectorAll('figure').length,
+      sortOrder: parseAttachmentMarkdown(markdownRef.current).length,
       remoteState: 'pending',
       ...emptyAudit(now),
     });
     const url = URL.createObjectURL(file);
     objectUrls.current.push(url);
-    editor.focus();
-    const selection = window.getSelection();
-    if (selection && savedRange.current) {
-      selection.removeAllRanges();
-      selection.addRange(savedRange.current);
-    }
-    document.execCommand(
-      'insertHTML',
-      false,
-      `<figure data-attachment-id="${attachmentId}"><img src="${url}" alt="日记图片"><figcaption>写下图片说明…</figcaption></figure><p><br></p>`,
-    );
+    editor.insertAttachment({ id: attachmentId, src: url, alt: '日记图片' });
     setMessage('图片已插入正文');
-    scheduleSave();
   }
 
   async function finish() {
-    const root = editorRef.current;
-    if (!root) return;
-    const markdown = htmlToMarkdown(root);
-    const hasImage = Boolean(root.querySelector('figure[data-attachment-id]'));
+    const markdown = editorRef.current?.getMarkdown() ?? markdownRef.current;
+    const hasImage = parseAttachmentMarkdown(markdown).length > 0;
     if (!visibleText(markdown) && !hasImage) {
       setMessage('空白日记不会被添加');
       return;
@@ -361,12 +345,6 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
     if (navigator.onLine) void syncNow();
   }
 
-  function applyFormat(command: string, value?: string) {
-    editorRef.current?.focus();
-    document.execCommand(command, false, value);
-    scheduleSave();
-  }
-
   const dateLabel = formatDiaryDate(journalDate, `${journalTime}:00.000`).label;
 
   return (
@@ -385,23 +363,18 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
       </header>
       <main className="editor-shell">
         {!ready && <div className="loading-state">正在打开本地草稿…</div>}
-        <div
-          ref={editorRef}
-          className="rich-editor"
-          contentEditable={ready}
-          suppressContentEditableWarning
-          data-placeholder="写下今天发生的事…"
-          onInput={scheduleSave}
-          onKeyUp={rememberRange}
-          onMouseUp={rememberRange}
-          onPaste={(event) => {
-            const file = [...event.clipboardData.files].find((item) => item.type.startsWith('image/'));
-            if (!file) return;
-            event.preventDefault();
-            rememberRange();
-            void insertImage(file);
-          }}
-        />
+        {ready && (
+          <DiaryEditor
+            ref={editorRef}
+            value={editorValue}
+            attachmentUrls={attachmentUrls}
+            onChange={(markdown) => {
+              markdownRef.current = markdown;
+              scheduleSave(markdown);
+            }}
+            onPasteImage={(file) => void insertImage(file)}
+          />
+        )}
         <footer className="writing-footer">
           <b>{count} 字</b><i /><span>{saveState}</span><i />
           <button onClick={() => setTagPicker((value) => !value)}>
@@ -409,17 +382,9 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
           </button>
           <small>可直接 Ctrl/Cmd + V 粘贴图片</small>
           <div className="editor-tools">
-            {formatOpen && (
-              <div className="format-menu">
-                <button onMouseDown={(event) => { event.preventDefault(); applyFormat('bold'); }}><b>B</b></button>
-                <button onMouseDown={(event) => { event.preventDefault(); applyFormat('italic'); }}><i>I</i></button>
-                <button onMouseDown={(event) => { event.preventDefault(); applyFormat('formatBlock', 'h2'); }}>H₂</button>
-                <button onMouseDown={(event) => { event.preventDefault(); applyFormat('insertUnorderedList'); }}>≡</button>
-                <button onMouseDown={(event) => { event.preventDefault(); applyFormat('formatBlock', 'blockquote'); }}>❞</button>
-              </div>
-            )}
-            <label className="tool-button" title="插入图片" onMouseDown={rememberRange}>
-              ▣＋
+            <label className="tool-button image-insert-button" title="插入图片">
+              <ImagePlus aria-hidden="true" />
+              <span>插入图片</span>
               <input
                 type="file"
                 accept={ALLOWED_IMAGES.join(',')}
@@ -431,7 +396,6 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
                 }}
               />
             </label>
-            <button className="tool-button" onClick={() => setFormatOpen((value) => !value)}>☷</button>
           </div>
         </footer>
         {tagPicker && (

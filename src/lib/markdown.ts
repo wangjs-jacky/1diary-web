@@ -74,6 +74,9 @@ export function markdownToHtml(
       if (lines.every((line) => line.startsWith('- '))) {
         return `<ul>${lines.map((line) => `<li>${inlineToHtml(line.slice(2))}</li>`).join('')}</ul>`;
       }
+      if (lines.every((line) => /^\d+\.\s/.test(line))) {
+        return `<ol>${lines.map((line) => `<li>${inlineToHtml(line.replace(/^\d+\.\s/, ''))}</li>`).join('')}</ol>`;
+      }
       return `<p>${inlineToHtml(block).replace(/\n/g, '<br>')}</p>`;
     })
     .join('');
@@ -99,8 +102,9 @@ export function htmlToMarkdown(root: HTMLElement) {
       if (node.matches('h1,h2')) return `## ${text}`;
       if (node.matches('blockquote')) return `> ${text}`;
       if (node.matches('ul,ol')) {
+        const ordered = node.matches('ol');
         return [...node.querySelectorAll(':scope > li')]
-          .map((item) => `- ${inlineToMarkdown(item).trim()}`)
+          .map((item, index) => `${ordered ? `${index + 1}.` : '-'} ${inlineToMarkdown(item).trim()}`)
           .join('\n');
       }
       if (node.matches('figure')) {
