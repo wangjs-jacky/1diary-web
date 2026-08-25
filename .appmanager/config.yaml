@@ -59,6 +59,17 @@ common:
         'VITE_SUPABASE_URL=https://hssfpetkwfavbcgcetnj.supabase.co' \
         'VITE_SUPABASE_ANON_KEY=sb_publishable_ugqyBBuhpwhcDV-rPEYTEg_7I7T4PGj' > .env.production
 
+      if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+        echo "ERROR: Node.js and npm are required to build one-diary-web" >> "$LOG_FILE"
+        exit 1
+      fi
+      if ! command -v pnpm >/dev/null 2>&1; then
+        npm install --global pnpm@10.11.0 --registry=https://registry.npmmirror.com >> "$LOG_FILE" 2>&1
+      fi
+      pnpm config set registry https://registry.npmmirror.com >> "$LOG_FILE" 2>&1
+      pnpm install --frozen-lockfile >> "$LOG_FILE" 2>&1
+      pnpm build >> "$LOG_FILE" 2>&1
+
       if [ ! -f dist/index.html ]; then
         echo "ERROR: prebuilt dist/index.html not found" >> "$LOG_FILE"
         exit 1
