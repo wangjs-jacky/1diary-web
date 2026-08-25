@@ -4,7 +4,7 @@ import config from '../.appmanager/config.yaml?raw';
 describe('production deployment config', () => {
   it('rebuilds the Vite bundle after writing production environment variables', () => {
     const envIndex = config.indexOf('> .env.production');
-    const buildIndex = config.indexOf('pnpm build');
+    const buildIndex = config.indexOf('"$PNPM_BIN" build');
     const distCheckIndex = config.indexOf('if [ ! -f dist/index.html ]');
 
     expect(envIndex).toBeGreaterThan(-1);

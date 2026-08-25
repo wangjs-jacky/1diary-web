@@ -63,12 +63,13 @@ common:
         echo "ERROR: Node.js and npm are required to build one-diary-web" >> "$LOG_FILE"
         exit 1
       fi
-      if ! command -v pnpm >/dev/null 2>&1; then
+      PNPM_BIN="$(npm prefix --global)/bin/pnpm"
+      if [ ! -x "$PNPM_BIN" ]; then
         npm install --global pnpm@10.11.0 --registry=https://registry.npmmirror.com >> "$LOG_FILE" 2>&1
       fi
-      pnpm config set registry https://registry.npmmirror.com >> "$LOG_FILE" 2>&1
-      pnpm install --frozen-lockfile >> "$LOG_FILE" 2>&1
-      pnpm build >> "$LOG_FILE" 2>&1
+      "$PNPM_BIN" config set registry https://registry.npmmirror.com >> "$LOG_FILE" 2>&1
+      "$PNPM_BIN" install --frozen-lockfile >> "$LOG_FILE" 2>&1
+      "$PNPM_BIN" build >> "$LOG_FILE" 2>&1
 
       if [ ! -f dist/index.html ]; then
         echo "ERROR: prebuilt dist/index.html not found" >> "$LOG_FILE"
