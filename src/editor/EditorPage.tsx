@@ -1,6 +1,8 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ImagePlus } from 'lucide-react';
+import { Check, ImagePlus } from 'lucide-react';
+import { Checkbox } from 'react-aria-components/Checkbox';
+import { CheckboxGroup } from 'react-aria-components/CheckboxGroup';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiRequest } from '../data/api';
 import { db } from '../data/db';
@@ -8,8 +10,9 @@ import { queueOperation, syncNow } from '../data/sync';
 import type { Attachment, Draft, Entry } from '../domain/types';
 import { newId } from '../lib/ids';
 import { parseAttachmentMarkdown, visibleText, wordCount } from '../lib/markdown';
-import { formatDiaryDate, localJournalTime } from '../lib/time';
+import { localJournalTime } from '../lib/time';
 import { DiaryEditor, type DiaryEditorHandle } from './DiaryEditor';
+import { DiaryFields } from './DiaryFields';
 
 const ALLOWED_IMAGES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic'];
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -345,20 +348,19 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
     if (navigator.onLine) void syncNow();
   }
 
-  const dateLabel = formatDiaryDate(journalDate, `${journalTime}:00.000`).label;
-
   return (
     <div className="editor-page">
       <header className="editor-bar">
         <button className="back-button" onClick={() => void persistDraft().finally(() => navigate('/'))}>← <span>返回</span></button>
-        <div className="date-fields" title={dateLabel}>
-          <input type="date" value={journalDate} onChange={(event) => setJournalDate(event.target.value)} aria-label="日记日期" />
-          <input type="time" value={journalTime} onChange={(event) => setJournalTime(event.target.value)} aria-label="日记时间" />
-        </div>
-        <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)} aria-label="分类">
-          <option value="">未分类</option>
-          {categories?.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-        </select>
+        <DiaryFields
+          journalDate={journalDate}
+          journalTime={journalTime}
+          categoryId={categoryId}
+          categories={categories ?? []}
+          onDateChange={setJournalDate}
+          onTimeChange={setJournalTime}
+          onCategoryChange={setCategoryId}
+        />
         <button className="done-button" onClick={() => void finish()} aria-label="完成">✓</button>
       </header>
       <main className="editor-shell">
@@ -400,17 +402,18 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
         </footer>
         {tagPicker && (
           <div className="tag-picker">
-            <b>标签</b>
-            {tags?.length ? tags.map((tag) => (
-              <label key={tag.id}>
-                <input
-                  type="checkbox"
-                  checked={selectedTags.includes(tag.id)}
-                  onChange={() => setSelectedTags((value) => value.includes(tag.id) ? value.filter((id) => id !== tag.id) : [...value, tag.id])}
-                />
-                #{tag.name}
-              </label>
-            )) : <span>还没有标签，可稍后在设置中创建</span>}
+            {tags?.length ? (
+              <CheckboxGroup aria-label="标签" value={selectedTags} onChange={setSelectedTags}>
+                <b>标签</b>
+                {tags.map((tag) => (
+                  <Checkbox key={tag.id} value={tag.id}>
+                    {({ isSelected }) => (
+                      <><span className="checkbox-box">{isSelected && <Check />}</span>#{tag.name}</>
+                    )}
+                  </Checkbox>
+                ))}
+              </CheckboxGroup>
+            ) : <span>还没有标签，可稍后在设置中创建</span>}
           </div>
         )}
       </main>
