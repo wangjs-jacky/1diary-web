@@ -170,4 +170,4 @@ export interface SyncResult {
   code?: string;
 }
 
-export type SyncStatus = 'idle' | 'syncing' | 'offline' | 'error';
+export type SyncStatus = 'idle' | 'syncing' | 'partial' | 'offline' | 'error';

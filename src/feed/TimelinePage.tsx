@@ -57,10 +57,16 @@ function useTimelineData() {
 }
 
 function SyncBadge() {
-  const { status, sync } = useSync();
-  const labels = { idle: '已同步', syncing: '同步中…', offline: '离线写作', error: '同步失败' };
+  const { status, detail, sync } = useSync();
+  const labels = {
+    idle: '已同步',
+    syncing: '同步中…',
+    partial: '部分待同步',
+    offline: '离线写作',
+    error: '同步失败',
+  };
   return (
-    <button className={`sync-badge ${status}`} onClick={() => void sync()} title="立即同步">
+    <button className={`sync-badge ${status}`} onClick={() => void sync()} title={detail ?? '立即同步'}>
       <i /> {labels[status]}
     </button>
   );

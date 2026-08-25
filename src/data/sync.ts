@@ -154,7 +154,18 @@ async function registerDevice() {
   return deviceId;
 }
 
-async function uploadPendingAttachments() {
+export interface AttachmentUploadSummary {
+  failedAttachmentIds: Set<string>;
+  failedDraftIds: Set<string>;
+  errors: string[];
+}
+
+export async function uploadPendingAttachments(): Promise<AttachmentUploadSummary> {
+  const summary: AttachmentUploadSummary = {
+    failedAttachmentIds: new Set(),
+    failedDraftIds: new Set(),
+    errors: [],
+  };
   const pending = await db.attachmentBlobs.where('status').anyOf('pending', 'failed').toArray();
   for (const item of pending) {
     await db.attachmentBlobs.update(item.id, { status: 'uploading', error: undefined });
@@ -176,24 +187,50 @@ async function uploadPendingAttachments() {
       await db.attachmentBlobs.update(item.id, { status: 'ready' });
       await db.attachments.update(item.id, { remoteState: 'ready' });
     } catch (error) {
+      const message = error instanceof Error ? error.message : '上传失败';
       await db.attachmentBlobs.update(item.id, {
         status: 'failed',
-        error: error instanceof Error ? error.message : '上传失败',
+        error: message,
       });
-      throw error;
+      summary.failedAttachmentIds.add(item.id);
+      summary.failedDraftIds.add(item.draftId);
+      summary.errors.push(message);
     }
   }
+  return summary;
 }
 
-async function pushOutbox(deviceId: string) {
-  await uploadPendingAttachments();
+function dependsOnFailedAttachment(record: OutboxRecord, failedDraftIds: ReadonlySet<string>) {
+  if (record.entityType === 'draft' && failedDraftIds.has(record.entityId)) return true;
+  return record.entityType === 'entry'
+    && record.operation === 'upsert'
+    && record.payload.mode === 'publish'
+    && typeof record.payload.draftId === 'string'
+    && failedDraftIds.has(record.payload.draftId);
+}
+
+export function partitionPushableRecords(
+  records: OutboxRecord[],
+  failedDraftIds: ReadonlySet<string>,
+) {
+  const pushable: OutboxRecord[] = [];
+  const deferred: OutboxRecord[] = [];
+  for (const record of records) {
+    (dependsOnFailedAttachment(record, failedDraftIds) ? deferred : pushable).push(record);
+  }
+  return { pushable, deferred };
+}
+
+export async function pushOutbox(deviceId: string) {
+  const uploadSummary = await uploadPendingAttachments();
   const now = new Date().toISOString();
   const records = (await db.outbox.orderBy('createdAt').toArray())
     .filter((item) => item.nextAttemptAt <= now)
     .slice(0, 100);
-  if (!records.length) return;
+  const { pushable } = partitionPushableRecords(records, uploadSummary.failedDraftIds);
+  if (!pushable.length) return uploadSummary;
   await db.outbox.bulkPut(
-    records.map((item) => ({
+    pushable.map((item) => ({
       ...item,
       attempts: item.attempts + 1,
       nextAttemptAt: new Date(Date.now() + Math.min(60_000, 2 ** (item.attempts + 1) * 1_000)).toISOString(),
@@ -203,11 +240,11 @@ async function pushOutbox(deviceId: string) {
     method: 'POST',
     body: JSON.stringify({
       deviceId,
-      operations: records.map(({ createdAt: _, attempts: __, nextAttemptAt: ___, lastError: ____, ...operation }) => operation),
+      operations: pushable.map(({ createdAt: _, attempts: __, nextAttemptAt: ___, lastError: ____, ...operation }) => operation),
     }),
   });
   for (const result of response.results) {
-    const record = records.find((item) => item.operationId === result.operationId);
+    const record = pushable.find((item) => item.operationId === result.operationId);
     if (!record) continue;
     if (result.status === 'applied' || result.status === 'conflict' || result.status === 'rejected') {
       await db.outbox.delete(record.operationId);
@@ -224,6 +261,7 @@ async function pushOutbox(deviceId: string) {
       lastError: result.code || 'TEMPORARY_FAILURE',
     });
   }
+  return uploadSummary;
 }
 
 async function pullChanges(deviceId: string) {
@@ -274,9 +312,14 @@ async function performSync() {
   setStatus('syncing');
   try {
     const deviceId = await registerDevice();
-    await pushOutbox(deviceId);
+    const uploadSummary = await pushOutbox(deviceId);
     await pullChanges(deviceId);
-    setStatus('idle');
+    if (uploadSummary.errors.length) {
+      const count = uploadSummary.failedAttachmentIds.size;
+      setStatus('partial', `${count} 张图片待重试，其他内容已同步`);
+    } else {
+      setStatus('idle');
+    }
   } catch (error) {
     setStatus(navigator.onLine ? 'error' : 'offline', error instanceof Error ? error.message : '同步失败');
   }

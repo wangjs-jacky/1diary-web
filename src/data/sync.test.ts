@@ -1,11 +1,101 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { OutboxRecord } from '../domain/types';
+import { apiRequest, uploadPresigned } from './api';
 import { db } from './db';
-import { queueOperation } from './sync';
+import { partitionPushableRecords, pushOutbox, queueOperation } from './sync';
+
+vi.mock('./api', () => ({
+  apiRequest: vi.fn(),
+  uploadPresigned: vi.fn(),
+}));
+
+const mockedApiRequest = vi.mocked(apiRequest);
+const mockedUploadPresigned = vi.mocked(uploadPresigned);
+
+function outboxRecord(overrides: Partial<OutboxRecord> = {}): OutboxRecord {
+  return {
+    operationId: crypto.randomUUID(),
+    entityType: 'entry',
+    entityId: crypto.randomUUID(),
+    operation: 'soft_delete',
+    baseVersion: '1',
+    payload: {},
+    createdAt: '2026-08-25T00:00:00.000Z',
+    attempts: 0,
+    nextAttemptAt: '2026-08-25T00:00:00.000Z',
+    ...overrides,
+  };
+}
 
 describe('offline outbox', () => {
   beforeEach(async () => {
+    vi.clearAllMocks();
     await db.delete();
     await db.open();
+  });
+
+  it('defers only operations that depend on a draft with failed images', () => {
+    const draftUpsert = outboxRecord({ entityType: 'draft', entityId: 'failed-draft', operation: 'upsert' });
+    const publish = outboxRecord({
+      entityType: 'entry',
+      operation: 'upsert',
+      payload: { mode: 'publish', draftId: 'failed-draft' },
+    });
+    const unrelatedDelete = outboxRecord();
+
+    const result = partitionPushableRecords(
+      [draftUpsert, publish, unrelatedDelete],
+      new Set(['failed-draft']),
+    );
+    expect(result.deferred).toEqual([draftUpsert, publish]);
+    expect(result.pushable).toEqual([unrelatedDelete]);
+  });
+
+  it('continues pushing unrelated operations when an attachment upload fails', async () => {
+    const now = new Date().toISOString();
+    await db.attachmentBlobs.put({
+      id: 'image-1',
+      draftId: 'failed-draft',
+      blob: new Blob(['image'], { type: 'image/png' }),
+      mimeType: 'image/png',
+      originalFilename: 'image.png',
+      byteSize: 5,
+      status: 'pending',
+      createdAt: now,
+    });
+    const failedDraft = outboxRecord({ entityType: 'draft', entityId: 'failed-draft', operation: 'upsert' });
+    const unrelatedDelete = outboxRecord();
+    await db.outbox.bulkPut([failedDraft, unrelatedDelete]);
+
+    mockedApiRequest.mockImplementation(async (path) => {
+      if (path === '/attachments/prepare') {
+        return { upload: { url: 'https://oss.example/upload', fields: {} } };
+      }
+      if (path === '/sync/push') {
+        return {
+          results: [{
+            operationId: unrelatedDelete.operationId,
+            entityType: unrelatedDelete.entityType,
+            entityId: unrelatedDelete.entityId,
+            status: 'applied',
+            version: '2',
+          }],
+        };
+      }
+      throw new Error(`unexpected path: ${path}`);
+    });
+    mockedUploadPresigned.mockRejectedValueOnce(new Error('OSS CORS blocked'));
+
+    const summary = await pushOutbox('device-1');
+
+    expect(summary.failedDraftIds).toEqual(new Set(['failed-draft']));
+    const pushCall = mockedApiRequest.mock.calls.find(([path]) => path === '/sync/push');
+    const pushBody = JSON.parse(String(pushCall?.[1]?.body));
+    expect(pushBody.operations.map((item: OutboxRecord) => item.operationId))
+      .toEqual([unrelatedDelete.operationId]);
+    expect(await db.outbox.get(failedDraft.operationId)).toBeDefined();
+    expect(await db.outbox.get(unrelatedDelete.operationId)).toBeUndefined();
+    expect((await db.attachmentBlobs.get('image-1'))?.status).toBe('failed');
   });
 
   it('coalesces unsent autosaves for the same draft', async () => {
