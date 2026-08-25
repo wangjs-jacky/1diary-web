@@ -1,0 +1,88 @@
+common:
+  deployment:
+    instanceId: i-bp1gx28cmt3tfsrcw0vd
+    port: 3080
+  scripts:
+    start: |
+      #!/bin/bash
+      set -e
+      APP_DIR=/root/1diary-web
+      ZIP_FILE=$(ls -1t /root/project_*.zip 2>/dev/null | head -1)
+      LOG_FILE=/root/app.log
+      PID_FILE=/root/app.pid
+
+      [ -f "$PID_FILE" ] && kill "$(cat "$PID_FILE")" 2>/dev/null || true
+      rm -f "$PID_FILE"
+
+      if command -v dnf >/dev/null 2>&1; then
+        PKG_MGR=dnf
+      elif command -v yum >/dev/null 2>&1; then
+        PKG_MGR=yum
+      elif command -v apt-get >/dev/null 2>&1; then
+        PKG_MGR=apt-get
+      else
+        echo "ERROR: No supported package manager found" >> "$LOG_FILE"
+        exit 1
+      fi
+
+      command -v unzip >/dev/null 2>&1 || $PKG_MGR install -y unzip
+      command -v curl >/dev/null 2>&1 || $PKG_MGR install -y curl
+      command -v python3 >/dev/null 2>&1 || $PKG_MGR install -y python3
+      if ! command -v docker >/dev/null 2>&1; then
+        $PKG_MGR install -y docker
+        systemctl enable --now docker
+      fi
+
+      mkdir -p /etc/docker
+      DAEMON_JSON=/etc/docker/daemon.json
+      MIRRORS='["https://registry.cn-hangzhou.aliyuncs.com", "https://mirror.ccs.tencentyun.com"]'
+      if [ -f "$DAEMON_JSON" ]; then
+        cp -p "$DAEMON_JSON" "$DAEMON_JSON.bak.$(date +%Y%m%d%H%M%S)"
+      fi
+      MIRROR_CHANGED=$(python3 -c "import json,os; p='$DAEMON_JSON'; cfg=json.load(open(p)) if os.path.exists(p) else {}; before=json.dumps(cfg,sort_keys=True); mirrors=json.loads('$MIRRORS'); existing=cfg.get('registry-mirrors') or []; [existing.append(m) for m in mirrors if m not in existing]; cfg['registry-mirrors']=existing; after=json.dumps(cfg,sort_keys=True); open(p,'w').write(json.dumps(cfg,indent=2)+'\\n'); print('1' if before != after else '0')")
+      if [ "$MIRROR_CHANGED" = "1" ]; then
+        systemctl restart docker
+        sleep 3
+      fi
+
+      mkdir -p "$APP_DIR"
+      if [ -z "$ZIP_FILE" ]; then
+        echo "ERROR: project archive not found" >> "$LOG_FILE"
+        exit 1
+      fi
+      unzip -o "$ZIP_FILE" -d "$APP_DIR" >> "$LOG_FILE" 2>&1
+      cd "$APP_DIR"
+
+      printf '%s\n' \
+        'VITE_API_URL=/v1' \
+        'VITE_SUPABASE_URL=https://hssfpetkwfavbcgcetnj.supabase.co' \
+        'VITE_SUPABASE_ANON_KEY=sb_publishable_ugqyBBuhpwhcDV-rPEYTEg_7I7T4PGj' > .env.production
+
+      echo "Starting 1diary-web on port 3080" >> "$LOG_FILE"
+      docker compose --env-file .env.production -f compose.frontend.yml up -d --build --remove-orphans >> "$LOG_FILE" 2>&1
+      docker compose --env-file .env.production -f compose.frontend.yml ps >> "$LOG_FILE" 2>&1
+      curl --retry 15 --retry-delay 2 --retry-connrefused -fsS http://127.0.0.1:3080/healthz >> "$LOG_FILE" 2>&1
+      echo >> "$LOG_FILE"
+      echo "1diary-web listening on port 3080" >> "$LOG_FILE"
+      sleep 3 && cat /root/app.log
+    stop: |
+      #!/bin/bash
+      APP_DIR=/root/1diary-web
+      LOG_FILE=/root/app.log
+      PID_FILE=/root/app.pid
+
+      if [ -d "$APP_DIR" ] && [ -f "$APP_DIR/compose.frontend.yml" ]; then
+        cd "$APP_DIR"
+        docker compose --env-file .env.production -f compose.frontend.yml down >> "$LOG_FILE" 2>&1 || true
+      fi
+      rm -f "$PID_FILE"
+
+      if [ -n "$APP_DIR" ] && [ "${#APP_DIR}" -gt 6 ] && [[ "$APP_DIR" == /root/* ]] && [ -d "$APP_DIR" ]; then
+        rm -rf "$APP_DIR"
+      fi
+metadata:
+  description: ''
+  groupName: default-cn-hangzhou
+  name: 1diary-web
+  regionId: cn-hangzhou
+  type: app
