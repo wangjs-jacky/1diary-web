@@ -25,6 +25,7 @@ const syncEvents = new EventTarget();
 let status: SyncStatus = navigator.onLine ? 'idle' : 'offline';
 let running: Promise<void> | null = null;
 let syncRequested = false;
+let forceRequested = false;
 
 function setStatus(next: SyncStatus, detail?: string) {
   status = next;
@@ -171,7 +172,7 @@ export async function uploadPendingAttachments(): Promise<AttachmentUploadSummar
     failedDraftIds: new Set(),
     errors: [],
   };
-  const pending = await db.attachmentBlobs.where('status').anyOf('pending', 'failed').toArray();
+  const pending = await db.attachmentBlobs.where('status').anyOf('pending', 'uploading', 'failed').toArray();
   for (const item of pending) {
     await db.attachmentBlobs.update(item.id, { status: 'uploading', error: undefined });
     try {
@@ -246,7 +247,7 @@ function repairLegacyPublishRecord(record: OutboxRecord, now: string) {
   };
 }
 
-export async function pushOutbox(deviceId: string) {
+export async function pushOutbox(deviceId: string, force = false) {
   const uploadSummary = await uploadPendingAttachments();
   const now = new Date().toISOString();
   const storedRecords = await db.outbox.orderBy('createdAt').toArray();
@@ -254,7 +255,7 @@ export async function pushOutbox(deviceId: string) {
   const changedRecords = repairedRecords.filter((record, index) => record !== storedRecords[index]);
   if (changedRecords.length) await db.outbox.bulkPut(changedRecords);
   const records = repairedRecords
-    .filter((item) => item.nextAttemptAt <= now)
+    .filter((item) => force || item.nextAttemptAt <= now)
     .slice(0, 100);
   const { pushable } = partitionPushableRecords(records, uploadSummary.failedDraftIds);
   if (!pushable.length) return uploadSummary;
@@ -333,7 +334,7 @@ async function pullChanges(deviceId: string) {
   }
 }
 
-async function performSync() {
+async function performSync(force = false) {
   if (!navigator.onLine) {
     setStatus('offline');
     return;
@@ -341,7 +342,7 @@ async function performSync() {
   setStatus('syncing');
   try {
     const deviceId = await registerDevice();
-    const uploadSummary = await pushOutbox(deviceId);
+    const uploadSummary = await pushOutbox(deviceId, force);
     await pullChanges(deviceId);
     if (uploadSummary.errors.length) {
       const count = uploadSummary.failedAttachmentIds.size;
@@ -355,13 +356,16 @@ async function performSync() {
   }
 }
 
-export function syncNow() {
+function requestSync(force: boolean) {
   syncRequested = true;
+  forceRequested ||= force;
   if (!running) {
     running = (async () => {
       while (syncRequested) {
+        const forceThisPass = forceRequested;
         syncRequested = false;
-        await performSync();
+        forceRequested = false;
+        await performSync(forceThisPass);
       }
     })().finally(() => {
       running = null;
@@ -370,13 +374,17 @@ export function syncNow() {
   return running;
 }
 
+export function syncNow() {
+  return requestSync(true);
+}
+
 export function startAutoSync() {
-  const online = () => void syncNow();
+  const online = () => void requestSync(false);
   const offline = () => setStatus('offline');
   window.addEventListener('online', online);
   window.addEventListener('offline', offline);
-  const timer = window.setInterval(() => void syncNow(), 45_000);
-  void syncNow();
+  const timer = window.setInterval(() => void requestSync(false), 45_000);
+  void requestSync(false);
   return () => {
     window.removeEventListener('online', online);
     window.removeEventListener('offline', offline);

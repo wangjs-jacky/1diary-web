@@ -126,14 +126,69 @@ async function cleanupEntry(browser: Browser, storageState: Awaited<ReturnType<t
     await expect(page.getByRole('link', { name: '一本日记' })).toBeVisible();
     await waitForIdle(page);
     const card = page.locator('.diary-card').filter({ hasText: marker });
-    await expect(card).toBeVisible();
-    await card.getByRole('button', { name: '删除' }).click();
-    await expect(card).toHaveCount(0);
-    await page.locator('.sync-badge').click();
-    await waitForIdle(page);
+    if (await card.count()) {
+      await card.getByRole('button', { name: '删除' }).click();
+      await expect(card).toHaveCount(0);
+      await page.locator('.sync-badge').click();
+      const retry = page.getByRole('button', { name: '立即重试' });
+      if (await retry.count()) await retry.click();
+      await waitForIdle(page);
+    }
   } finally {
     await context.close();
   }
+}
+
+async function seedBackedOffDelete(page: Page, marker: string) {
+  await page.evaluate(async (entryMarker) => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('one-diary');
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    try {
+      const entry = await new Promise<Record<string, unknown>>((resolve, reject) => {
+        const transaction = database.transaction('entries', 'readonly');
+        const request = transaction.objectStore('entries').getAll();
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const match = (request.result as Array<Record<string, unknown>>)
+            .find((item) => String(item.bodyMarkdown ?? '').includes(entryMarker));
+          if (match) resolve(match);
+          else reject(new Error(`entry not found for ${entryMarker}`));
+        };
+      });
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction('outbox', 'readwrite');
+        const now = new Date().toISOString();
+        const operationId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (character) => {
+          const random = Math.floor(Math.random() * 16);
+          const value = character === 'x' ? random : (random & 0x3) | 0x8;
+          return value.toString(16);
+        });
+        const request = transaction.objectStore('outbox').put({
+            operationId,
+            entityType: 'entry',
+            entityId: entry.id,
+            operation: 'soft_delete',
+            baseVersion: entry.version,
+            payload: {},
+            createdAt: now,
+            attempts: 4,
+            nextAttemptAt: '2099-01-01T00:00:00.000Z',
+            lastError: 'TEMPORARY_FAILURE',
+        });
+        request.onerror = () => reject(request.error);
+        transaction.oncomplete = () => {
+          resolve();
+        };
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+    } finally {
+      database.close();
+    }
+  }, marker);
 }
 
 test('[SYNC-01] 完成日记后一次自动同步，并在清空本地缓存后从服务端恢复', async ({ browser }) => {
@@ -199,6 +254,58 @@ test('[SYNC-01] 完成日记后一次自动同步，并在清空本地缓存后�
     if (video) {
       videoPath = await video.path().catch(() => null);
       if (videoPath) await copyFile(videoPath, path.join(artifactDir, 'SYNC-01-production-sync.webm'));
+    }
+    await cleanupEntry(browser, storageState, marker);
+  }
+});
+
+test('[SYNC-02] 历史退避记录展示原因，并可一次立即重试成功', async ({ browser }) => {
+  const storageState = await authenticatedStorage(browser);
+  const marker = `E2E-LEGACY-SYNC-${Date.now()}`;
+  const observations: PushObservation[] = [];
+  const context = await createCaseContext(browser, storageState);
+  const page = await context.newPage();
+  const video = page.video();
+  observePushes(page, observations);
+
+  try {
+    await page.goto('/');
+    await expect(page.getByRole('link', { name: '一本日记' })).toBeVisible();
+    await waitForIdle(page);
+    await page.getByRole('button', { name: '写新日记' }).click();
+    const editor = page.getByRole('textbox', { name: '日记正文' });
+    await editor.fill(`${marker}\n用于验证历史待同步记录的立即重试。`);
+    await page.getByRole('button', { name: '完成' }).click();
+    await expect(page.locator('.diary-card').filter({ hasText: marker })).toBeVisible();
+    await waitForIdle(page);
+
+    observations.length = 0;
+    await seedBackedOffDelete(page, marker);
+    await page.reload();
+    const badge = page.getByRole('button', { name: '部分待同步' });
+    await expect(badge).toBeVisible();
+    await badge.click();
+
+    const details = page.getByRole('dialog', { name: '同步详情' });
+    await expect(details).toBeVisible();
+    await expect(details.getByText('日记 · 删除')).toBeVisible();
+    await expect(details.getByText('TEMPORARY_FAILURE')).toBeVisible();
+    if (recordEvidence) await showEvidenceNote(page, '历史待同步原因已展开：一次点击立即重试');
+    await page.screenshot({ path: path.join(artifactDir, 'SYNC-02-pending-details.png'), fullPage: true });
+
+    await details.getByRole('button', { name: '立即重试' }).click();
+    await waitForIdle(page);
+    await expect.poll(
+      () => observations.some((item) => item.entityTypes.includes('entry') && item.resultStatuses.includes('applied')),
+      { timeout: 30_000, message: '立即重试应绕过退避时间并推送历史记录' },
+    ).toBe(true);
+    if (recordEvidence) await showEvidenceNote(page, '立即重试成功：历史队列已清空');
+  } finally {
+    await page.close();
+    await context.close();
+    if (video) {
+      const videoPath = await video.path().catch(() => null);
+      if (videoPath) await copyFile(videoPath, path.join(artifactDir, 'SYNC-02-production-sync.webm'));
     }
     await cleanupEntry(browser, storageState, marker);
   }

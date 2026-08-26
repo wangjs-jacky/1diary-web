@@ -18,6 +18,16 @@ type TimelineData = {
   drafts: number;
 };
 
+function readableSyncError(error: string) {
+  const messages: Record<string, string> = {
+    TEMPORARY_FAILURE: '上次连接服务器失败',
+    NETWORK_ERROR: '上次网络连接失败',
+    UPLOAD_FAILED: '上次图片上传失败',
+  };
+  const message = messages[error];
+  return message ? `${message}（${error}）` : error;
+}
+
 function useTimelineData() {
   return useLiveQuery<TimelineData>(async () => {
     const [allEntries, categoryRows, tagRows, entryTagRows, attachmentRows, drafts] = await Promise.all([
@@ -58,6 +68,14 @@ function useTimelineData() {
 
 function SyncBadge() {
   const { status, detail, sync } = useSync();
+  const [open, setOpen] = useState(false);
+  const pending = useLiveQuery(async () => {
+    const [operations, attachments] = await Promise.all([
+      db.outbox.orderBy('createdAt').toArray(),
+      db.attachmentBlobs.where('status').anyOf('pending', 'uploading', 'failed').toArray(),
+    ]);
+    return { operations, attachments };
+  }, []);
   const labels = {
     idle: '已同步',
     syncing: '同步中…',
@@ -65,10 +83,66 @@ function SyncBadge() {
     offline: '离线写作',
     error: '同步失败',
   };
+  const entityLabels = {
+    category: '分类',
+    tag: '标签',
+    entry: '日记',
+    draft: '草稿',
+    entry_tag: '日记标签',
+    draft_tag: '草稿标签',
+    attachment: '图片信息',
+    draft_attachment_ref: '图片关联',
+  };
+  const operationLabels = {
+    upsert: '保存',
+    soft_delete: '删除',
+    restore: '恢复',
+    purge: '彻底删除',
+  };
+  const operationCount = pending?.operations.length ?? 0;
+  const attachmentCount = pending?.attachments.length ?? 0;
   return (
-    <button className={`sync-badge ${status}`} onClick={() => void sync()} title={detail ?? '立即同步'}>
-      <i /> {labels[status]}
-    </button>
+    <div className="sync-control">
+      <button
+        className={`sync-badge ${status}`}
+        onClick={() => setOpen((value) => !value)}
+        title={detail ?? '查看同步状态'}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+      >
+        <i /> {labels[status]}
+      </button>
+      {open && (
+        <section className="sync-details" role="dialog" aria-label="同步详情">
+          <header>
+            <div><b>同步详情</b><span>{detail ?? '本地内容已与服务器同步'}</span></div>
+            <button onClick={() => setOpen(false)} aria-label="关闭同步详情">×</button>
+          </header>
+          {operationCount + attachmentCount === 0 ? (
+            <p className="sync-empty">当前没有等待同步的内容</p>
+          ) : (
+            <ul>
+              {pending?.operations.map((item) => (
+                <li key={item.operationId}>
+                  <b>{entityLabels[item.entityType]} · {operationLabels[item.operation]}</b>
+                  <span>{item.lastError ? readableSyncError(item.lastError) : (item.attempts ? `已经重试 ${item.attempts} 次` : '等待发送')}</span>
+                </li>
+              ))}
+              {pending?.attachments.map((item) => (
+                <li key={item.id}>
+                  <b>图片 · {item.originalFilename ?? '未命名图片'}</b>
+                  <span>{item.error ?? (item.status === 'uploading' ? '上次上传被中断，将重新尝试' : '等待上传')}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <footer>
+            <small>{operationCount} 条内容 · {attachmentCount} 张图片</small>
+            <button onClick={() => void sync()}>立即重试</button>
+          </footer>
+        </section>
+      )}
+    </div>
   );
 }
 

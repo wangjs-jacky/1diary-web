@@ -6,6 +6,7 @@ import {
   partitionPushableRecords,
   pushOutbox,
   queueOperation,
+  startAutoSync,
   subscribeSyncStatus,
   syncNow,
 } from './sync';
@@ -102,6 +103,32 @@ describe('offline outbox', () => {
     expect(await db.outbox.get(failedDraft.operationId)).toBeDefined();
     expect(await db.outbox.get(unrelatedDelete.operationId)).toBeUndefined();
     expect((await db.attachmentBlobs.get('image-1'))?.status).toBe('failed');
+  });
+
+  it('retries an image left in uploading state by an interrupted browser session', async () => {
+    const now = new Date().toISOString();
+    await db.attachmentBlobs.put({
+      id: 'stale-upload',
+      draftId: 'draft-1',
+      blob: new Blob(['image'], { type: 'image/png' }),
+      mimeType: 'image/png',
+      originalFilename: 'stale.png',
+      byteSize: 5,
+      status: 'uploading',
+      createdAt: now,
+    });
+    mockedApiRequest.mockImplementation(async (path) => {
+      if (path === '/attachments/prepare') {
+        return { upload: { url: 'https://oss.example/upload', fields: {} } };
+      }
+      if (path === '/attachments/stale-upload/complete') return {};
+      throw new Error(`unexpected path: ${path}`);
+    });
+
+    await pushOutbox('device-1');
+
+    expect(mockedUploadPresigned).toHaveBeenCalledTimes(1);
+    expect((await db.attachmentBlobs.get('stale-upload'))?.status).toBe('ready');
   });
 
   it('coalesces unsent autosaves for the same draft', async () => {
@@ -218,13 +245,47 @@ describe('offline outbox', () => {
     const events: Array<{ status: string; detail?: string }> = [];
     const unsubscribe = subscribeSyncStatus((event) => events.push(event));
 
+    const stop = startAutoSync();
     try {
-      await syncNow();
+      await vi.waitFor(() => {
+        expect(events.at(-1)).toEqual({ status: 'partial', detail: '还有 1 条内容等待同步' });
+      });
     } finally {
+      stop();
       unsubscribe();
     }
+  });
 
-    expect(events.at(-1)).toEqual({ status: 'partial', detail: '还有 1 条内容等待同步' });
+  it('immediately retries a backed-off operation when the user requests sync', async () => {
+    await db.meta.put({ key: 'syncCursor', value: '0' });
+    const record = outboxRecord({
+      attempts: 4,
+      nextAttemptAt: '2099-01-01T00:00:00.000Z',
+      lastError: 'TEMPORARY_FAILURE',
+    });
+    await db.outbox.put(record);
+    mockedApiRequest.mockImplementation(async (path, init) => {
+      if (path === '/devices/register') return {};
+      if (path === '/sync/push') {
+        const body = JSON.parse(String(init?.body)) as { operations: OutboxRecord[] };
+        return {
+          results: body.operations.map((operation) => ({
+            operationId: operation.operationId,
+            entityType: operation.entityType,
+            entityId: operation.entityId,
+            status: 'applied',
+            version: '2',
+          })),
+        };
+      }
+      if (path.startsWith('/sync/pull')) return { changes: [], nextCursor: '0', hasMore: false };
+      throw new Error(`unexpected path: ${path}`);
+    });
+
+    await syncNow();
+
+    expect(mockedApiRequest.mock.calls.some(([path]) => path === '/sync/push')).toBe(true);
+    expect(await db.outbox.get(record.operationId)).toBeUndefined();
   });
 
   it('runs another pass when an operation is queued during an active sync', async () => {
