@@ -123,13 +123,14 @@ async function cleanupEntry(browser: Browser, storageState: Awaited<ReturnType<t
   page.on('dialog', (dialog) => void dialog.accept());
   try {
     await page.goto('/');
+    await expect(page.getByRole('link', { name: '一本日记' })).toBeVisible();
+    await waitForIdle(page);
     const card = page.locator('.diary-card').filter({ hasText: marker });
-    if (await card.count()) {
-      await card.getByRole('button', { name: '删除' }).click();
-      await expect(card).toHaveCount(0);
-      await page.locator('.sync-badge').click();
-      await waitForIdle(page);
-    }
+    await expect(card).toBeVisible();
+    await card.getByRole('button', { name: '删除' }).click();
+    await expect(card).toHaveCount(0);
+    await page.locator('.sync-badge').click();
+    await waitForIdle(page);
   } finally {
     await context.close();
   }
@@ -199,6 +200,6 @@ test('[SYNC-01] 完成日记后一次自动同步，并在清空本地缓存后�
       videoPath = await video.path().catch(() => null);
       if (videoPath) await copyFile(videoPath, path.join(artifactDir, 'SYNC-01-production-sync.webm'));
     }
-    await cleanupEntry(browser, storageState, marker).catch(() => undefined);
+    await cleanupEntry(browser, storageState, marker);
   }
 });
