@@ -24,6 +24,7 @@ import { db } from './db';
 const syncEvents = new EventTarget();
 let status: SyncStatus = navigator.onLine ? 'idle' : 'offline';
 let running: Promise<void> | null = null;
+let syncRequested = false;
 
 function setStatus(next: SyncStatus, detail?: string) {
   status = next;
@@ -355,7 +356,17 @@ async function performSync() {
 }
 
 export function syncNow() {
-  if (!running) running = performSync().finally(() => (running = null));
+  syncRequested = true;
+  if (!running) {
+    running = (async () => {
+      while (syncRequested) {
+        syncRequested = false;
+        await performSync();
+      }
+    })().finally(() => {
+      running = null;
+    });
+  }
   return running;
 }
 

@@ -226,4 +226,48 @@ describe('offline outbox', () => {
 
     expect(events.at(-1)).toEqual({ status: 'partial', detail: '还有 1 条内容等待同步' });
   });
+
+  it('runs another pass when an operation is queued during an active sync', async () => {
+    await db.meta.put({ key: 'syncCursor', value: '0' });
+    let releaseFirstPull: ((value: { changes: never[]; nextCursor: string; hasMore: false }) => void) | undefined;
+    let pullCount = 0;
+    mockedApiRequest.mockImplementation(async (path, init) => {
+      if (path === '/devices/register') return {};
+      if (path === '/sync/push') {
+        const body = JSON.parse(String(init?.body)) as { operations: OutboxRecord[] };
+        return {
+          results: body.operations.map((operation) => ({
+            operationId: operation.operationId,
+            entityType: operation.entityType,
+            entityId: operation.entityId,
+            status: 'applied',
+            version: '2',
+          })),
+        };
+      }
+      if (path.startsWith('/sync/pull')) {
+        pullCount += 1;
+        if (pullCount === 1) {
+          return new Promise((resolve) => {
+            releaseFirstPull = resolve;
+          });
+        }
+        return { changes: [], nextCursor: '0', hasMore: false };
+      }
+      throw new Error(`unexpected path: ${path}`);
+    });
+
+    const firstSync = syncNow();
+    await vi.waitFor(() => expect(releaseFirstPull).toBeTypeOf('function'));
+    const record = outboxRecord();
+    await db.outbox.put(record);
+    const requestedDuringSync = syncNow();
+    releaseFirstPull?.({ changes: [], nextCursor: '0', hasMore: false });
+
+    await Promise.all([firstSync, requestedDuringSync]);
+
+    expect(pullCount).toBe(2);
+    expect(mockedApiRequest.mock.calls.filter(([path]) => path === '/sync/push')).toHaveLength(1);
+    expect(await db.outbox.get(record.operationId)).toBeUndefined();
+  });
 });
