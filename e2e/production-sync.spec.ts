@@ -161,11 +161,10 @@ async function seedBackedOffDelete(page: Page, marker: string) {
       await new Promise<void>((resolve, reject) => {
         const transaction = database.transaction('outbox', 'readwrite');
         const now = new Date().toISOString();
-        const operationId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (character) => {
-          const random = Math.floor(Math.random() * 16);
-          const value = character === 'x' ? random : (random & 0x3) | 0x8;
-          return value.toString(16);
-        });
+        const randomTail = Math.floor(Math.random() * 0xffffffffffff)
+          .toString(16)
+          .padStart(12, '0');
+        const operationId = `018f6b6a-7e02-7abc-8def-${randomTail}`;
         const request = transaction.objectStore('outbox').put({
             operationId,
             entityType: 'entry',
