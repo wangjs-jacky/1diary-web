@@ -1,0 +1,172 @@
+name: CI / CD
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Typecheck, test and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.11.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Production build
+        run: pnpm build
+
+  deploy:
+    name: Deploy production
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event_name == 'push')
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: http://121.43.32.242:3080/
+    concurrency:
+      group: one-diary-web-production
+      cancel-in-progress: false
+    env:
+      ALIBABA_CLOUD_ACCESS_KEY_ID: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_ID }}
+      ALIBABA_CLOUD_ACCESS_KEY_SECRET: ${{ secrets.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
+      ALIBABA_CLOUD_REGION_ID: cn-hangzhou
+      ALIBABA_CLOUD_USER_AGENT: AlibabaCloud-Agent-Skills/alibabacloud-ecs-code-deploy/${{ github.sha }}
+      APPMANAGER_CONFIG_B64: ${{ secrets.APPMANAGER_CONFIG_B64 }}
+      APP_NAME: one-diary-web
+      APP_GROUP: default-cn-hangzhou
+      PRODUCTION_URL: http://121.43.32.242:3080
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Validate deployment secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in ALIBABA_CLOUD_ACCESS_KEY_ID ALIBABA_CLOUD_ACCESS_KEY_SECRET APPMANAGER_CONFIG_B64; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Missing production Environment secret: ${name}"
+              exit 1
+            fi
+          done
+
+      - name: Restore AppManager config
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .appmanager
+          printf '%s' "$APPMANAGER_CONFIG_B64" | base64 --decode > .appmanager/config.yaml
+          chmod 600 .appmanager/config.yaml
+          python3 - <<'PY'
+          import pathlib
+          import sys
+          config = pathlib.Path('.appmanager/config.yaml').read_text()
+          required = ('one-diary-web', 'default-cn-hangzhou', 'cn-hangzhou', 'i-bp1gx28cmt3tfsrcw0vd')
+          missing = [value for value in required if value not in config]
+          if missing:
+              print(f'Invalid AppManager config; missing expected values: {missing}', file=sys.stderr)
+              raise SystemExit(1)
+          PY
+
+      - name: Install Alibaba Cloud CLI and AppManager
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --connect-timeout 30 --max-time 120 -fsSL \
+            https://aliyun-cli.oss-cn-hangzhou.aliyuncs.com/aliyun-cli-linux-latest-amd64.tgz \
+            -o "$RUNNER_TEMP/aliyun-cli.tgz"
+          tar -xzf "$RUNNER_TEMP/aliyun-cli.tgz" -C "$RUNNER_TEMP"
+          sudo install -m 0755 "$RUNNER_TEMP/aliyun" /usr/local/bin/aliyun
+          aliyun version
+          aliyun appmanager --version
+
+      - name: Deploy with AppManager
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          deploy_log="$RUNNER_TEMP/appmanager-deploy.ndjson"
+          aliyun appmanager app deploy --overwrite --output json --region "$ALIBABA_CLOUD_REGION_ID" | tee "$deploy_log"
+          revision_id=$(jq -r 'select(.type == "result" and .status == "success") | .revision_id // empty' "$deploy_log" | tail -n 1)
+          if [[ -z "$revision_id" ]]; then
+            echo '::error::AppManager did not return a successful revision ID'
+            exit 1
+          fi
+          echo "revision_id=$revision_id" >> "$GITHUB_OUTPUT"
+
+      - name: Verify released revision
+        shell: bash
+        env:
+          EXPECTED_REVISION: ${{ steps.deploy.outputs.revision_id }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 18); do
+            status_output=$(aliyun appmanager app status \
+              --name "$APP_NAME" \
+              --group_name "$APP_GROUP" \
+              --output json 2>&1) || true
+            app_state=$(jq -r '.data.status // empty' <<<"$status_output" 2>/dev/null || true)
+            status_message=$(jq -r '.data.status_message // empty' <<<"$status_output" 2>/dev/null || true)
+            if [[ "$app_state" == 'Released' && "$status_message" == *"$EXPECTED_REVISION"* ]]; then
+              echo "Verified released revision: $EXPECTED_REVISION"
+              exit 0
+            fi
+            echo "Waiting for revision $EXPECTED_REVISION (attempt $attempt/18, state=${app_state:-unknown})"
+            sleep 10
+          done
+          echo "::error::Revision $EXPECTED_REVISION was not observed as Released"
+          exit 1
+
+      - name: Verify production health
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --retry 12 --retry-delay 5 --retry-all-errors -fsS "$PRODUCTION_URL/healthz"
+          index_html=$(curl --retry 6 --retry-delay 3 --retry-all-errors -fsS "$PRODUCTION_URL/")
+          grep -q '<title>一本日记</title>' <<<"$index_html"
+
+      - name: Publish deployment summary
+        if: success()
+        shell: bash
+        env:
+          REVISION_ID: ${{ steps.deploy.outputs.revision_id }}
+        run: |
+          {
+            echo '## Production deployment'
+            echo ''
+            echo "- Revision: \`$REVISION_ID\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- URL: $PRODUCTION_URL/"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove restored deployment config
+        if: always()
+        run: rm -f .appmanager/config.yaml
