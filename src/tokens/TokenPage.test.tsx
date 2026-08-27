@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -105,6 +105,44 @@ describe('TokenPage', () => {
       name: 'Codex on Mac mini',
       scopes: ['diary:read', 'diary:write'],
     });
+  });
+
+  it('removes the one-time secret before adding a created token to the list', async () => {
+    const module = await import('./TokenPage') as typeof import('./TokenPage') & {
+      withoutTokenSecret?: (
+        created: typeof activeToken & { token: string },
+      ) => Record<string, unknown>;
+    };
+    const created = {
+      ...activeToken,
+      token: '1diary_pat_11111111-1111-4111-8111-111111111111.private-secret',
+    };
+
+    expect(module.withoutTokenSecret?.(created)).toEqual(activeToken);
+    expect(module.withoutTokenSecret?.(created)).not.toHaveProperty('token');
+  });
+
+  it('does not allow token creation until the initial list has loaded', async () => {
+    let finishLoading: ((response: Response) => void) | undefined;
+    vi.mocked(fetch).mockImplementationOnce(
+      () => new Promise<Response>((resolve) => {
+        finishLoading = resolve;
+      }),
+    );
+
+    render(<MemoryRouter><TokenPage /></MemoryRouter>);
+
+    const createButton = screen.getByRole('button', { name: '创建 Token' });
+    expect(createButton).toBeDisabled();
+
+    await waitFor(() => expect(finishLoading).toBeTypeOf('function'));
+    finishLoading!(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    await waitFor(() => expect(createButton).toBeEnabled());
   });
 
   it('revokes an active token after confirmation', async () => {

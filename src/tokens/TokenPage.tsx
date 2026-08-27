@@ -30,6 +30,14 @@ type CreatedPersonalAccessToken = PersonalAccessToken & { token: string };
 
 type TokenStatus = 'active' | 'expired' | 'revoked';
 
+export function withoutTokenSecret(
+  created: CreatedPersonalAccessToken,
+): PersonalAccessToken {
+  const { token, ...listed } = created;
+  void token;
+  return listed;
+}
+
 function statusOf(token: PersonalAccessToken): TokenStatus {
   if (token.revokedAt) return 'revoked';
   if (token.expiresAt && new Date(token.expiresAt).getTime() <= Date.now()) {
@@ -174,7 +182,7 @@ export function TokenPage() {
         method: 'POST',
         body: JSON.stringify({ name: trimmedName, scopes, expiresAt }),
       });
-      setTokens((current) => [next, ...current]);
+      setTokens((current) => [withoutTokenSecret(next), ...current]);
       setCreated(next);
       setName('');
     } catch (requestError) {
@@ -249,7 +257,11 @@ export function TokenPage() {
                 <option value="never">永不过期</option>
               </select>
             </label>
-            <button type="submit" className="token-create-button" disabled={creating}>
+            <button
+              type="submit"
+              className="token-create-button"
+              disabled={creating || loading}
+            >
               <AppIcon icon={KeyRound} name="create-token" size={17} />
               {creating ? '正在创建…' : '创建 Token'}
             </button>
