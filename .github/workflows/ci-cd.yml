@@ -115,7 +115,7 @@ jobs:
           set -euo pipefail
           deploy_log="$RUNNER_TEMP/appmanager-deploy.ndjson"
           aliyun appmanager app deploy --overwrite --output json --region "$ALIBABA_CLOUD_REGION_ID" | tee "$deploy_log"
-          revision_id=$(jq -r 'select(.type == "result" and .status == "success") | .revision_id // empty' "$deploy_log" | tail -n 1)
+          revision_id=$(jq -Rr 'fromjson? | select(.type == "result" and .status == "success") | .revision_id // empty' "$deploy_log" | tail -n 1)
           if [[ -z "$revision_id" ]]; then
             echo '::error::AppManager did not return a successful revision ID'
             exit 1
