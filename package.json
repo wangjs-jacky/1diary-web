@@ -9,7 +9,8 @@
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e:production-sync": "playwright test --config playwright.production.config.ts e2e/production-sync.spec.ts"
+    "test:e2e:production-sync": "playwright test --config playwright.production.config.ts e2e/production-sync.spec.ts",
+    "test:e2e:production-editor": "playwright test --config playwright.production.config.ts e2e/production-editor-visual.spec.ts"
   },
   "engines": {
     "node": ">=22"
@@ -19,6 +20,8 @@
     "@supabase/supabase-js": "^2.112.4",
     "@tiptap/core": "3.30.3",
     "@tiptap/extension-placeholder": "3.30.3",
+    "@tiptap/extension-task-item": "3.30.3",
+    "@tiptap/extension-task-list": "3.30.3",
     "@tiptap/react": "3.30.3",
     "@tiptap/starter-kit": "3.30.3",
     "dexie": "^4.4.5",

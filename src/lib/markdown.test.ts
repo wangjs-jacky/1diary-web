@@ -25,6 +25,33 @@ describe('markdown editor conversion', () => {
     expect(htmlToMarkdown(root)).toBe('1. 第一项\n2. 第二项');
   });
 
+  it('round-trips H1 through H4 without collapsing their levels', () => {
+    const markdown = '# 一级标题\n\n## 二级标题\n\n### 三级标题\n\n#### 四级标题';
+    const html = markdownToHtml(markdown);
+
+    expect(html).toContain('<h1>一级标题</h1>');
+    expect(html).toContain('<h2>二级标题</h2>');
+    expect(html).toContain('<h3>三级标题</h3>');
+    expect(html).toContain('<h4>四级标题</h4>');
+
+    const root = document.createElement('div');
+    root.innerHTML = html;
+    expect(htmlToMarkdown(root)).toBe(markdown);
+  });
+
+  it('round-trips checked and unchecked markdown tasks', () => {
+    const markdown = '- [ ] 整理今天的照片\n- [x] 写完日记';
+    const html = markdownToHtml(markdown);
+
+    expect(html).toContain('data-type="taskList"');
+    expect(html).toContain('data-checked="false"');
+    expect(html).toContain('data-checked="true"');
+
+    const root = document.createElement('div');
+    root.innerHTML = html;
+    expect(htmlToMarkdown(root)).toBe(markdown);
+  });
+
   it('round-trips inline attachment references', () => {
     const root = document.createElement('div');
     root.innerHTML = '<h2>散步</h2><p>今天很好。</p><figure data-attachment-id="abc"><img src="blob:x"><figcaption>江边</figcaption></figure>';

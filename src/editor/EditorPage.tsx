@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ImagePlus } from 'lucide-react';
+import { ArrowLeft, Check, ImagePlus, Tags } from 'lucide-react';
 import { Checkbox } from 'react-aria-components/Checkbox';
 import { CheckboxGroup } from 'react-aria-components/CheckboxGroup';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -11,6 +11,7 @@ import type { Attachment, Draft, Entry } from '../domain/types';
 import { newId } from '../lib/ids';
 import { parseAttachmentMarkdown, visibleText, wordCount } from '../lib/markdown';
 import { localJournalTime } from '../lib/time';
+import { AppIcon } from '../ui/icons';
 import { DiaryEditor, type DiaryEditorHandle } from './DiaryEditor';
 import { DiaryFields } from './DiaryFields';
 
@@ -351,7 +352,7 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
   return (
     <div className="editor-page">
       <header className="editor-bar">
-        <button className="back-button" onClick={() => void persistDraft().finally(() => navigate('/'))}>← <span>返回</span></button>
+        <button className="back-button" onClick={() => void persistDraft().finally(() => navigate('/'))}><AppIcon icon={ArrowLeft} name="back" /><span>返回</span></button>
         <DiaryFields
           journalDate={journalDate}
           journalTime={journalTime}
@@ -361,7 +362,7 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
           onTimeChange={setJournalTime}
           onCategoryChange={setCategoryId}
         />
-        <button className="done-button" onClick={() => void finish()} aria-label="完成">✓</button>
+        <button className="done-button" onClick={() => void finish()} aria-label="完成"><AppIcon icon={Check} name="done" size={21} /></button>
       </header>
       <main className="editor-shell">
         {!ready && <div className="loading-state">正在打开本地草稿…</div>}
@@ -379,13 +380,14 @@ export function EditorPage({ mode }: { mode: EditorMode }) {
         )}
         <footer className="writing-footer">
           <b>{count} 字</b><i /><span>{saveState}</span><i />
-          <button onClick={() => setTagPicker((value) => !value)}>
-            {selectedTags.length ? tags?.filter((tag) => selectedTags.includes(tag.id)).map((tag) => `#${tag.name}`).join('  ') : '＋ 添加标签'}
+          <button className="tag-trigger" onClick={() => setTagPicker((value) => !value)}>
+            <AppIcon icon={Tags} name="tags" size={15} />
+            {selectedTags.length ? tags?.filter((tag) => selectedTags.includes(tag.id)).map((tag) => `#${tag.name}`).join('  ') : '添加标签'}
           </button>
           <small>可直接 Ctrl/Cmd + V 粘贴图片</small>
           <div className="editor-tools">
             <label className="tool-button image-insert-button" title="插入图片">
-              <ImagePlus aria-hidden="true" />
+              <AppIcon icon={ImagePlus} name="insert-image" />
               <span>插入图片</span>
               <input
                 type="file"

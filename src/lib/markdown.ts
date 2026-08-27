@@ -64,13 +64,22 @@ export function markdownToHtml(
             : '<div class="image-placeholder">图片离线缓存不可用</div>'
         }<figcaption>${escapeHtml(caption || '图片')}</figcaption></figure>`;
       }
-      if (/^#{1,2}\s/.test(block)) {
-        return `<h2>${inlineToHtml(block.replace(/^#{1,2}\s/, ''))}</h2>`;
+      const heading = /^(#{1,4})\s+(.+)$/.exec(block);
+      if (heading) {
+        const level = heading[1]!.length;
+        return `<h${level}>${inlineToHtml(heading[2]!)}</h${level}>`;
       }
       if (block.startsWith('> ')) {
         return `<blockquote>${inlineToHtml(block.slice(2)).replace(/\n/g, '<br>')}</blockquote>`;
       }
       const lines = block.split('\n');
+      if (lines.every((line) => /^- \[(?: |x|X)\]\s/.test(line))) {
+        return `<ul data-type="taskList">${lines.map((line) => {
+          const task = /^- \[([ xX])\]\s(.*)$/.exec(line)!;
+          const checked = task[1]!.toLocaleLowerCase() === 'x';
+          return `<li data-type="taskItem" data-checked="${checked}"><label contenteditable="false"><input type="checkbox"${checked ? ' checked' : ''} disabled><span></span></label><div><p>${inlineToHtml(task[2]!)}</p></div></li>`;
+        }).join('')}</ul>`;
+      }
       if (lines.every((line) => line.startsWith('- '))) {
         return `<ul>${lines.map((line) => `<li>${inlineToHtml(line.slice(2))}</li>`).join('')}</ul>`;
       }
@@ -99,9 +108,22 @@ export function htmlToMarkdown(root: HTMLElement) {
       if (node.nodeType === Node.TEXT_NODE) return node.textContent?.trim() ?? '';
       if (!(node instanceof HTMLElement)) return '';
       const text = inlineToMarkdown(node).trim();
-      if (node.matches('h1,h2')) return `## ${text}`;
+      if (node.matches('h1,h2,h3,h4')) {
+        const level = Number(node.tagName.slice(1));
+        return `${'#'.repeat(level)} ${text}`;
+      }
       if (node.matches('blockquote')) return `> ${text}`;
       if (node.matches('ul,ol')) {
+        if (node.matches('ul[data-type="taskList"]')) {
+          return [...node.querySelectorAll(':scope > li[data-type="taskItem"]')]
+            .map((item) => {
+              const checked = item.getAttribute('data-checked') === 'true'
+                || item.querySelector('input[type="checkbox"]')?.hasAttribute('checked');
+              const content = item.querySelector(':scope > div') ?? item;
+              return `- [${checked ? 'x' : ' '}] ${inlineToMarkdown(content).trim()}`;
+            })
+            .join('\n');
+        }
         const ordered = node.matches('ol');
         return [...node.querySelectorAll(':scope > li')]
           .map((item, index) => `${ordered ? `${index + 1}.` : '-'} ${inlineToMarkdown(item).trim()}`)
@@ -136,6 +158,6 @@ export function wordCount(markdown: string) {
 }
 
 export function firstHeading(markdown: string) {
-  const heading = /^#{1,2}\s+(.+)$/m.exec(markdown)?.[1]?.trim();
+  const heading = /^#{1,4}\s+(.+)$/m.exec(markdown)?.[1]?.trim();
   return heading || '';
 }

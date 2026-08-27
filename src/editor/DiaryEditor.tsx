@@ -1,13 +1,19 @@
 import Placeholder from '@tiptap/extension-placeholder';
+import TaskItem from '@tiptap/extension-task-item';
+import TaskList from '@tiptap/extension-task-list';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import {
   Bold,
   Braces,
+  Heading1,
   Heading2,
+  Heading3,
+  Heading4,
   Italic,
   List,
   ListOrdered,
+  ListTodo,
   Pilcrow,
   Quote,
   Redo2,
@@ -70,7 +76,9 @@ export const DiaryEditor = forwardRef<DiaryEditorHandle, DiaryEditorProps>(funct
     immediatelyRender: false,
     shouldRerenderOnTransaction: true,
     extensions: [
-      StarterKit.configure({ heading: { levels: [2] } }),
+      StarterKit.configure({ heading: { levels: [1, 2, 3, 4] } }),
+      TaskList.configure({ HTMLAttributes: { class: 'task-list' } }),
+      TaskItem.configure({ nested: true, HTMLAttributes: { class: 'task-item' } }),
       Placeholder.configure({ placeholder: '写下今天发生的事…' }),
       AttachmentImage,
     ],
@@ -103,11 +111,15 @@ export const DiaryEditor = forwardRef<DiaryEditorHandle, DiaryEditorProps>(funct
 
   const tools = [
     { label: '正文', active: editor.isActive('paragraph'), icon: <Pilcrow />, run: () => editor.chain().focus().setParagraph().run() },
+    { label: '一级标题', active: editor.isActive('heading', { level: 1 }), icon: <Heading1 />, run: () => editor.chain().focus().toggleHeading({ level: 1 }).run() },
     { label: '二级标题', active: editor.isActive('heading', { level: 2 }), icon: <Heading2 />, run: () => editor.chain().focus().toggleHeading({ level: 2 }).run() },
+    { label: '三级标题', active: editor.isActive('heading', { level: 3 }), icon: <Heading3 />, run: () => editor.chain().focus().toggleHeading({ level: 3 }).run() },
+    { label: '四级标题', active: editor.isActive('heading', { level: 4 }), icon: <Heading4 />, run: () => editor.chain().focus().toggleHeading({ level: 4 }).run() },
     { label: '加粗', active: editor.isActive('bold'), icon: <Bold />, run: () => editor.chain().focus().toggleBold().run() },
     { label: '斜体', active: editor.isActive('italic'), icon: <Italic />, run: () => editor.chain().focus().toggleItalic().run() },
     { label: '无序列表', active: editor.isActive('bulletList'), icon: <List />, run: () => editor.chain().focus().toggleBulletList().run() },
     { label: '有序列表', active: editor.isActive('orderedList'), icon: <ListOrdered />, run: () => editor.chain().focus().toggleOrderedList().run() },
+    { label: '任务列表', active: editor.isActive('taskList'), icon: <ListTodo />, run: () => editor.chain().focus().toggleTaskList().run() },
     { label: '引用', active: editor.isActive('blockquote'), icon: <Quote />, run: () => editor.chain().focus().toggleBlockquote().run() },
     { label: '行内代码', active: editor.isActive('code'), icon: <Braces />, run: () => editor.chain().focus().toggleCode().run() },
   ];

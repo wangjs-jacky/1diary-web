@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { db } from '../data/db';
 import type { OutboxRecord } from '../domain/types';
@@ -32,6 +32,8 @@ function backedOffEntry(): OutboxRecord {
 }
 
 describe('timeline sync details', () => {
+  afterEach(cleanup);
+
   beforeEach(async () => {
     sync.mockClear();
     await db.delete();
@@ -64,5 +66,20 @@ describe('timeline sync details', () => {
 
     await user.click(screen.getByRole('button', { name: '立即重试' }));
     expect(sync).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses a branded mark and library icons for primary web actions', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><TimelinePage /></MemoryRouter>);
+
+    const brand = screen.getByRole('link', { name: '一本日记' });
+    expect(brand.querySelector('svg[data-brand-mark]')).toBeInTheDocument();
+
+    for (const name of ['搜索', '切换主题', '更多', '写新日记']) {
+      expect(screen.getByRole('button', { name }).querySelector('svg[data-icon-name]')).toBeInTheDocument();
+    }
+
+    await user.click(screen.getByRole('button', { name: '更多' }));
+    expect(screen.getByRole('link', { name: /日历/ }).querySelector('svg[data-icon-name="calendar"]')).toBeInTheDocument();
   });
 });

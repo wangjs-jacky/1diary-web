@@ -35,6 +35,7 @@ import {
 } from 'react-aria-components/Select';
 import { TimeField } from 'react-aria-components/TimeField';
 import type { Category } from '../domain/types';
+import { AppIcon } from '../ui/icons';
 
 type DiaryFieldsProps = {
   journalDate: string;
@@ -52,9 +53,9 @@ function CalendarPopover() {
       <Dialog>
         <Calendar>
           <header className="calendar-header">
-            <Button slot="previous" aria-label="上个月"><ChevronLeft /></Button>
+            <Button slot="previous" aria-label="上个月"><AppIcon icon={ChevronLeft} name="previous-month" size={16} /></Button>
             <Heading />
-            <Button slot="next" aria-label="下个月"><ChevronRight /></Button>
+            <Button slot="next" aria-label="下个月"><AppIcon icon={ChevronRight} name="next-month" size={16} /></Button>
           </header>
           <CalendarGrid>
             <CalendarGridHeader>
@@ -88,9 +89,9 @@ export function DiaryFields({
           onChange={(value) => value && onDateChange(value.toString())}
         >
           <Group className="field-trigger date-trigger">
-            <CalendarDays aria-hidden="true" />
+            <AppIcon icon={CalendarDays} name="calendar" size={16} />
             <DateInput>{(segment) => <DateSegment segment={segment} />}</DateInput>
-            <Button aria-label="选择日期"><ChevronDown aria-hidden="true" /></Button>
+            <Button aria-label="选择日期"><AppIcon icon={ChevronDown} name="open-calendar" size={14} /></Button>
           </Group>
           <CalendarPopover />
         </DatePicker>
@@ -101,7 +102,7 @@ export function DiaryFields({
           onChange={(value) => value && onTimeChange(value.toString().slice(0, 5))}
         >
           <Group className="field-trigger time-trigger">
-            <Clock3 aria-hidden="true" />
+            <AppIcon icon={Clock3} name="time" size={16} />
             <DateInput>{(segment) => <DateSegment segment={segment} />}</DateInput>
           </Group>
         </TimeField>
@@ -113,7 +114,7 @@ export function DiaryFields({
         >
           <Button className="field-trigger category-trigger" aria-label="选择分类">
             <SelectValue />
-            <ChevronDown aria-hidden="true" />
+            <AppIcon icon={ChevronDown} name="open-category" size={14} />
           </Button>
           <Popover className="field-popover select-popover">
             <ListBox>

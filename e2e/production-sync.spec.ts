@@ -127,7 +127,7 @@ async function cleanupEntry(browser: Browser, storageState: Awaited<ReturnType<t
     await waitForIdle(page);
     const card = page.locator('.diary-card').filter({ hasText: marker });
     if (await card.count()) {
-      await card.getByRole('button', { name: '删除' }).click();
+      await card.getByRole('button', { name: '删除日记' }).click();
       await expect(card).toHaveCount(0);
       await page.locator('.sync-badge').click();
       const retry = page.getByRole('button', { name: '立即重试' });

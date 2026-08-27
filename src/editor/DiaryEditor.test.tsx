@@ -69,4 +69,31 @@ describe('DiaryEditor', () => {
     });
     expect(onPasteImage).toHaveBeenCalledWith(file);
   });
+
+  it('offers H1 through H4 and markdown task controls without losing their syntax', async () => {
+    const ref = createRef<DiaryEditorHandle>();
+    render(
+      <DiaryEditor
+        ref={ref}
+        value={'# 一级标题\n\n## 二级标题\n\n### 三级标题\n\n#### 四级标题\n\n- [ ] 未完成\n- [x] 已完成'}
+        attachmentUrls={new Map()}
+        onChange={vi.fn()}
+        onPasteImage={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '一级标题' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '二级标题' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '三级标题' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '四级标题' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '任务列表' })).toBeVisible();
+    const taskCheckboxes = screen.getAllByRole('checkbox');
+    expect(taskCheckboxes[0]!.closest('li')).toHaveClass('task-item');
+
+    await waitFor(() => {
+      expect(ref.current?.getMarkdown()).toBe(
+        '# 一级标题\n\n## 二级标题\n\n### 三级标题\n\n#### 四级标题\n\n- [ ] 未完成\n- [x] 已完成',
+      );
+    });
+  });
 });

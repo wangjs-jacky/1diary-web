@@ -1,4 +1,23 @@
 import { useLiveQuery } from 'dexie-react-hooks';
+import {
+  CalendarDays,
+  ChevronDown,
+  ChevronUp,
+  CloudCheck,
+  CloudCog,
+  CloudOff,
+  Ellipsis,
+  FilePenLine,
+  History,
+  LogOut,
+  MoonStar,
+  PencilLine,
+  Plus,
+  Search,
+  Sun,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
@@ -10,6 +29,7 @@ import { newId } from '../lib/ids';
 import { firstHeading, markdownToHtml, visibleText, wordCount } from '../lib/markdown';
 import { formatDiaryDate } from '../lib/time';
 import { useSync } from '../sync/SyncContext';
+import { AppIcon, DiaryMark } from '../ui/icons';
 
 type TimelineData = {
   entries: Entry[];
@@ -101,6 +121,14 @@ function SyncBadge() {
   };
   const operationCount = pending?.operations.length ?? 0;
   const attachmentCount = pending?.attachments.length ?? 0;
+  const statusIcons = {
+    idle: { icon: CloudCheck, name: 'cloud-check' },
+    syncing: { icon: CloudCog, name: 'cloud-sync' },
+    partial: { icon: CloudCog, name: 'cloud-pending' },
+    offline: { icon: CloudOff, name: 'cloud-off' },
+    error: { icon: CloudOff, name: 'cloud-error' },
+  };
+  const statusIcon = statusIcons[status];
   return (
     <div className="sync-control">
       <button
@@ -110,13 +138,14 @@ function SyncBadge() {
         aria-expanded={open}
         aria-haspopup="dialog"
       >
-        <i /> {labels[status]}
+        <AppIcon icon={statusIcon.icon} name={statusIcon.name} size={16} />
+        <span>{labels[status]}</span>
       </button>
       {open && (
         <section className="sync-details" role="dialog" aria-label="同步详情">
           <header>
             <div><b>同步详情</b><span>{detail ?? '本地内容已与服务器同步'}</span></div>
-            <button onClick={() => setOpen(false)} aria-label="关闭同步详情">×</button>
+            <button onClick={() => setOpen(false)} aria-label="关闭同步详情"><AppIcon icon={X} name="close" size={16} /></button>
           </header>
           {operationCount + attachmentCount === 0 ? (
             <p className="sync-empty">当前没有等待同步的内容</p>
@@ -138,7 +167,7 @@ function SyncBadge() {
           )}
           <footer>
             <small>{operationCount} 条内容 · {attachmentCount} 张图片</small>
-            <button onClick={() => void sync()}>立即重试</button>
+            <button onClick={() => void sync()}><AppIcon icon={CloudCog} name="retry-sync" size={15} />立即重试</button>
           </footer>
         </section>
       )}
@@ -217,6 +246,7 @@ function EntryCard({
             setExpanded((value) => !value);
           }}
         >
+          <AppIcon icon={expanded ? ChevronUp : ChevronDown} name={expanded ? 'collapse' : 'expand'} size={15} />
           {expanded ? '收起' : '展开全文'}
         </button>
       )}
@@ -226,8 +256,8 @@ function EntryCard({
         <span>{tags.map((tag) => `#${tag.name}`).join('  ')}</span>
         {entry.attachmentCount ? <span>{entry.attachmentCount} 张图片</span> : null}
         <div className="entry-actions">
-          <button onClick={(event) => { event.stopPropagation(); navigate(`/entry/${entry.id}`); }}>编辑</button>
-          <button onClick={(event) => { event.stopPropagation(); onDelete(); }}>删除</button>
+          <button title="编辑日记" aria-label="编辑日记" onClick={(event) => { event.stopPropagation(); navigate(`/entry/${entry.id}`); }}><AppIcon icon={PencilLine} name="edit" /></button>
+          <button title="删除日记" aria-label="删除日记" onClick={(event) => { event.stopPropagation(); onDelete(); }}><AppIcon icon={Trash2} name="delete" /></button>
         </div>
       </footer>
     </article>
@@ -280,26 +310,26 @@ export function TimelinePage() {
     <div className="app-page">
       <header className="app-bar">
         <div><SyncBadge /></div>
-        <Link to="/" className="brand">一本日记</Link>
+        <Link to="/" className="brand" aria-label="一本日记"><DiaryMark /><span>一本日记</span></Link>
         <div className="bar-actions">
-          <button className="icon-button" onClick={() => setSearchOpen((value) => !value)} aria-label="搜索">⌕</button>
-          <button className="icon-button" onClick={toggleTheme} aria-label="切换主题">{dark ? '☼' : '☾'}</button>
-          <button className="icon-button" onClick={() => setMenuOpen((value) => !value)} aria-label="更多">···</button>
+          <button className="icon-button" onClick={() => setSearchOpen((value) => !value)} aria-label="搜索"><AppIcon icon={Search} name="search" /></button>
+          <button className="icon-button" onClick={toggleTheme} aria-label="切换主题"><AppIcon icon={dark ? Sun : MoonStar} name={dark ? 'sun' : 'moon'} /></button>
+          <button className="icon-button" onClick={() => setMenuOpen((value) => !value)} aria-label="更多"><AppIcon icon={Ellipsis} name="more" /></button>
         </div>
         {menuOpen && (
           <nav className="app-menu">
-            <Link to="/drafts">草稿 <span>{data?.drafts ?? 0}</span></Link>
-            <Link to="/calendar">日历</Link>
-            <Link to="/memories">往年今日</Link>
-            <Link to="/trash">回收站</Link>
-            <button onClick={() => void auth.signOut()}>退出账号</button>
+            <Link to="/drafts"><AppIcon icon={FilePenLine} name="drafts" />草稿 <span>{data?.drafts ?? 0}</span></Link>
+            <Link to="/calendar"><AppIcon icon={CalendarDays} name="calendar" />日历</Link>
+            <Link to="/memories"><AppIcon icon={History} name="memories" />往年今日</Link>
+            <Link to="/trash"><AppIcon icon={Trash2} name="trash" />回收站</Link>
+            <button onClick={() => void auth.signOut()}><AppIcon icon={LogOut} name="logout" />退出账号</button>
           </nav>
         )}
       </header>
       {searchOpen && (
         <div className="search-panel">
           <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索正文、分类或标签…" />
-          <button onClick={() => { setQuery(''); setSearchOpen(false); }}>×</button>
+          <button onClick={() => { setQuery(''); setSearchOpen(false); }} aria-label="关闭搜索"><AppIcon icon={X} name="close-search" /></button>
         </div>
       )}
       <main className="timeline">
@@ -331,7 +361,7 @@ export function TimelinePage() {
           })
         )}
       </main>
-      <button className="new-entry-button" onClick={() => navigate(`/new/${newId()}`)} aria-label="写新日记">＋</button>
+      <button className="new-entry-button" onClick={() => navigate(`/new/${newId()}`)} aria-label="写新日记"><AppIcon icon={Plus} name="new-entry" size={24} /></button>
     </div>
   );
 }
