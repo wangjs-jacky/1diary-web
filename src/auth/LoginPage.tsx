@@ -44,7 +44,11 @@ export function LoginPage() {
         return;
       }
       const result = await auth.signUp(email.trim(), password);
-      if (result.error) setError('暂时无法创建账号，请稍后重试');
+      if (result.error) {
+        setError(result.errorCode === 'over_email_send_rate_limit'
+          ? '验证邮件发送过于频繁，请稍后再试'
+          : '暂时无法创建账号，请稍后重试');
+      }
       else if (result.confirmationRequired) setNotice('注册成功，请检查邮箱完成验证');
     } else {
       const message = await auth.signIn(email.trim(), password);
@@ -70,18 +74,19 @@ export function LoginPage() {
           <button type="button" aria-pressed={mode === 'login'} onClick={() => switchMode('login')}>登录</button>
           <button type="button" aria-pressed={mode === 'register'} onClick={() => switchMode('register')}>创建账号</button>
         </div>
-        <label className="auth-field">
-          <span>邮箱</span>
+        <div className="auth-field">
+          <label htmlFor="auth-email">邮箱</label>
           <div className="auth-input-shell">
             <AppIcon icon={Mail} name="email" size={17} />
-            <input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
+            <input id="auth-email" type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required />
           </div>
-        </label>
-        <label className="auth-field">
-          <span>密码</span>
+        </div>
+        <div className="auth-field">
+          <label htmlFor="auth-password">密码</label>
           <div className="auth-input-shell">
             <AppIcon icon={LockKeyhole} name="password" size={17} />
             <input
+              id="auth-password"
               type={showPassword ? 'text' : 'password'}
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               value={password}
@@ -98,13 +103,14 @@ export function LoginPage() {
               <AppIcon icon={showPassword ? EyeOff : Eye} name={showPassword ? 'hide-password' : 'show-password'} size={17} />
             </button>
           </div>
-        </label>
+        </div>
         {mode === 'register' && (
-          <label className="auth-field">
-            <span>确认密码</span>
+          <div className="auth-field">
+            <label htmlFor="auth-password-confirmation">确认密码</label>
             <div className="auth-input-shell">
               <AppIcon icon={LockKeyhole} name="confirm-password" size={17} />
               <input
+                id="auth-password-confirmation"
                 type={showPassword ? 'text' : 'password'}
                 autoComplete="new-password"
                 value={confirmation}
@@ -113,7 +119,7 @@ export function LoginPage() {
                 required
               />
             </div>
-          </label>
+          </div>
         )}
         {error && <div className="form-error" role="alert">{error}</div>}
         {notice && <div className="form-notice" role="status">{notice}</div>}

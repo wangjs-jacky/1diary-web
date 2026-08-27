@@ -20,7 +20,7 @@ async function authenticatedStorage(browser: Browser) {
   const page = await context.newPage();
   const { email, password } = credentials();
   await page.goto('/');
-  await page.getByLabel('账号').fill(email);
+  await page.getByLabel('邮箱').fill(email);
   await page.getByLabel('密码').fill(password);
   await page.getByRole('button', { name: '进入日记' }).click();
   await expect(page.getByRole('link', { name: '一本日记' })).toBeVisible({ timeout: 30_000 });

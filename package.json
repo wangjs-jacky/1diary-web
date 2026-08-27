@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
+    "test:e2e:auth-time": "playwright test --config playwright.production.config.ts e2e/auth-time-dialog.spec.ts",
     "test:watch": "vitest",
     "test:e2e:production-sync": "playwright test --config playwright.production.config.ts e2e/production-sync.spec.ts",
     "test:e2e:production-editor": "playwright test --config playwright.production.config.ts e2e/production-editor-visual.spec.ts"

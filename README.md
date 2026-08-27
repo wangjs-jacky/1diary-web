@@ -11,4 +11,4 @@ pnpm install
 pnpm dev
 ```
 
-不提供注册入口；账号由 Supabase 后台预先创建。
+登录页支持邮箱密码登录和注册。注册依赖 Supabase Email Provider；开启邮箱确认时，新账号需要先通过验证邮件完成确认。

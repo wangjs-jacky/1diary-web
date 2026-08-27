@@ -30,7 +30,7 @@ async function authenticatedStorage(browser: Browser) {
   const { email, password } = credentials();
   await page.goto('/');
   await expect(page.getByText('需要完成连接配置')).toHaveCount(0);
-  await page.getByLabel('账号').fill(email);
+  await page.getByLabel('邮箱').fill(email);
   await page.getByLabel('密码').fill(password);
   await page.getByRole('button', { name: '进入日记' }).click();
   await expect(page.getByRole('link', { name: '一本日记' })).toBeVisible();

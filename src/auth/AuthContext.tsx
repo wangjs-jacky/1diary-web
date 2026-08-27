@@ -8,7 +8,11 @@ type AuthContextValue = {
   loading: boolean;
   session: Session | null;
   signIn(email: string, password: string): Promise<string | null>;
-  signUp(email: string, password: string): Promise<{ error: string | null; confirmationRequired: boolean }>;
+  signUp(email: string, password: string): Promise<{
+    error: string | null;
+    errorCode: string | null;
+    confirmationRequired: boolean;
+  }>;
   signOut(): Promise<void>;
 };
 
@@ -73,7 +77,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       },
       async signUp(email, password) {
         const client = await getSupabase();
-        if (!client) return { error: '尚未配置 Supabase', confirmationRequired: false };
+        if (!client) return { error: '尚未配置 Supabase', errorCode: null, confirmationRequired: false };
         const { data, error } = await client.auth.signUp({
           email,
           password,
@@ -81,6 +85,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         });
         return {
           error: error?.message ?? null,
+          errorCode: error?.code ?? null,
           confirmationRequired: !error && !data.session,
         };
       },
