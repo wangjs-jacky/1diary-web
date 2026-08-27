@@ -11,6 +11,7 @@ const DraftsPage = lazy(() => library().then((module) => ({ default: module.Draf
 const TrashPage = lazy(() => library().then((module) => ({ default: module.TrashPage })));
 const CalendarPage = lazy(() => library().then((module) => ({ default: module.CalendarPage })));
 const MemoriesPage = lazy(() => library().then((module) => ({ default: module.MemoriesPage })));
+const TokenPage = lazy(() => import('./tokens/TokenPage').then((module) => ({ default: module.TokenPage })));
 
 function SignedInApp() {
   const auth = useAuth();
@@ -28,6 +29,7 @@ function SignedInApp() {
             <Route path="/trash" element={<TrashPage />} />
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/memories" element={<MemoriesPage />} />
+            <Route path="/tokens" element={<TokenPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

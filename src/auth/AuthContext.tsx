@@ -8,6 +8,7 @@ type AuthContextValue = {
   loading: boolean;
   session: Session | null;
   signIn(email: string, password: string): Promise<string | null>;
+  signUp(email: string, password: string): Promise<{ error: string | null; confirmationRequired: boolean }>;
   signOut(): Promise<void>;
 };
 
@@ -69,6 +70,19 @@ export function AuthProvider({ children }: PropsWithChildren) {
         if (!client) return '尚未配置 Supabase';
         const { error } = await client.auth.signInWithPassword({ email, password });
         return error?.message ?? null;
+      },
+      async signUp(email, password) {
+        const client = await getSupabase();
+        if (!client) return { error: '尚未配置 Supabase', confirmationRequired: false };
+        const { data, error } = await client.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: window.location.origin },
+        });
+        return {
+          error: error?.message ?? null,
+          confirmationRequired: !error && !data.session,
+        };
       },
       async signOut() {
         const client = await getSupabase();

@@ -81,5 +81,6 @@ describe('timeline sync details', () => {
 
     await user.click(screen.getByRole('button', { name: '更多' }));
     expect(screen.getByRole('link', { name: /日历/ }).querySelector('svg[data-icon-name="calendar"]')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /访问令牌/ })).toHaveAttribute('href', '/tokens');
   });
 });

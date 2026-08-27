@@ -9,6 +9,7 @@ import {
   Ellipsis,
   FilePenLine,
   History,
+  KeyRound,
   LogOut,
   MoonStar,
   PencilLine,
@@ -322,6 +323,7 @@ export function TimelinePage() {
             <Link to="/calendar"><AppIcon icon={CalendarDays} name="calendar" />日历</Link>
             <Link to="/memories"><AppIcon icon={History} name="memories" />往年今日</Link>
             <Link to="/trash"><AppIcon icon={Trash2} name="trash" />回收站</Link>
+            <Link to="/tokens"><AppIcon icon={KeyRound} name="tokens" />访问令牌</Link>
             <button onClick={() => void auth.signOut()}><AppIcon icon={LogOut} name="logout" />退出账号</button>
           </nav>
         )}
